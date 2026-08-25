@@ -929,6 +929,19 @@ describe("rps 适配层", function()
     assert.equal(1, r.draw_streak)
   end)
 
+  it("ROUND_BEGIN 带上 draw_streak,客户端才能显示加速提示", function()
+    local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
+    rps.on_start(s, d, 0)
+    assert.equal(0, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+    rps.on_loop(s, d, 1, {                      -- 制造一次平局
+      mock.message("a", OP_THROW, { hand = 0 }),
+      mock.message("b", OP_THROW, { hand = 1 }),
+      mock.message("c", OP_THROW, { hand = 2 }),
+    })
+    rps.on_loop(s, d, 1000, {})                 -- 开下一轮
+    assert.equal(1, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+  end)
+
   it("连续平局时下一轮倒计时缩短", function()
     local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
     rps.on_start(s, d, 0)
@@ -1053,6 +1066,9 @@ local function begin_round(state, dispatcher, tick)
   dispatcher.broadcast_message(OP.ROUND_BEGIN, nk.json_encode({
     round = g.round, alive = g.alive,
     seconds = secs, deadline_tick = g.deadline,
+    -- 客户端要在回合开始时就显示「连续平局 ×N,加速」,
+    -- 所以 draw_streak 必须跟着 ROUND_BEGIN 走,不能只在 ROUND_RESULT 里发。
+    draw_streak = g.draw_streak,
   }))
 end
 
@@ -1899,6 +1915,7 @@ git commit -m "feat(lobby): create_room / list_rooms / list_games RPCs"
 - Create: `godot/nakama.cfg.example`, `godot/nakama.cfg`
 - Create: `godot/src/autoload/NakamaConfig.gd`
 - Create: `godot/src/net/OpCodes.gd`
+- Create: `godot/src/net/JsonSafe.gd`
 - Create: `godot/src/autoload/ServerConnection.gd`
 
 > Godot 端没有单测(装 GUT 属于本计划范围外)。验证方式是 `--headless --quit` 做解析检查 + 手工观察。每个任务都给了确切的预期现象。
@@ -2009,6 +2026,41 @@ const ROCK    := 0
 const PAPER   := 1
 const SCISSOR := 2
 ```
+
+- [ ] **Step 5b: 写 JSON 防御助手**
+
+服务端是 Lua,而 Lua 分不清「空表」和「空数组」—— `nk.json_encode({})` 产出 `{}` 不是 `[]`。
+客户端把它赋给静态 `Array` 类型的变量会直接抛运行时错误。这个坑在本项目里踩过三次
+(`list_rooms` / `list_games` / `ROUND_RESULT.afk`),所以统一收敛到一个助手里。
+
+Create `godot/src/net/JsonSafe.gd`:
+
+```gdscript
+class_name JsonSafe
+extends RefCounted
+## 服务端 JSON 的防御性读取。
+##
+## Lua 分不清「空表」和「空数组」,`nk.json_encode({})` 产出的是 `{}` 而不是 `[]`。
+## 于是服务端一个本该是数组的空字段,到客户端会解析成 Dictionary;直接赋给
+## 静态 Array 类型的变量会抛:
+##     Trying to assign value of type 'Dictionary' to a variable of type 'Array'
+## 这个坑在本项目里已经踩过三次(list_rooms / list_games / ROUND_RESULT.afk),
+## 所以统一收敛到这里。凡是从服务端读数组,一律走 arr()。
+
+
+## 取出一个必定是 Array 的值。缺失、类型不对、或是 Lua 的空表 `{}`,都返回 []。
+static func arr(source: Dictionary, key: String) -> Array:
+	var value = source.get(key, [])
+	return value if value is Array else []
+
+
+## 同上,但用于取字典字段(Lua 空表在这里反而是对的)。
+static func dict(source: Dictionary, key: String) -> Dictionary:
+	var value = source.get(key, {})
+	return value if value is Dictionary else {}
+```
+
+**规矩:凡是从服务端 payload 里读数组,一律走 `JsonSafe.arr()`,不要直接 `payload.get(k, [])`。**
 
 - [ ] **Step 6: 写 ServerConnection**
 
@@ -2140,10 +2192,7 @@ func list_rooms_async() -> Array:
 	var payload = JSON.parse_string(res.payload)
 	if not (payload is Dictionary):
 		return []
-	# ⚠️ Lua 分不清空表和空数组,服务端空列表会编码成 {} 而不是 []。
-	# 不归一化的话这里返回 Dictionary,而签名是 -> Array,运行时直接报错。
-	var rooms = payload.get("rooms", [])
-	return rooms if rooms is Array else []
+	return JsonSafe.arr(payload, "rooms")
 
 
 func list_games_async() -> Array:
@@ -2153,8 +2202,7 @@ func list_games_async() -> Array:
 	var payload = JSON.parse_string(res.payload)
 	if not (payload is Dictionary):
 		return []
-	var games = payload.get("games", [])
-	return games if games is Array else []
+	return JsonSafe.arr(payload, "games")
 
 
 ## 建房并直接进去。返回 match_id,失败返回空串。
@@ -2642,7 +2690,7 @@ func _on_room_event(op_code: int, payload: Dictionary) -> void:
 
 
 func _apply_room_state(payload: Dictionary) -> void:
-	_players = payload.get("players", [])
+	_players = JsonSafe.arr(payload, "players")
 	_host    = str(payload.get("host", ""))
 	_phase   = str(payload.get("phase", "waiting"))
 
@@ -2683,7 +2731,7 @@ func _start_game(payload: Dictionary) -> void:
 
 
 func _end_game(payload: Dictionary) -> void:
-	var results: Array = payload.get("results", [])
+	var results := JsonSafe.arr(payload, "results")
 	if _game != null:
 		_game.game_ended(results)
 	if results.is_empty():
@@ -2825,7 +2873,7 @@ func game_ended(results: Array) -> void:
 # ---------------------------------------------------------------- 回合
 
 func _on_round_begin(p: Dictionary) -> void:
-	_alive = p.get("alive", [])
+	_alive = JsonSafe.arr(p, "alive")
 	_thrown = false
 	_round_seconds = float(p.get("seconds", 3.0))
 	_time_left = _round_seconds
@@ -2846,7 +2894,7 @@ func _on_round_result(p: Dictionary) -> void:
 	_time_left = 0.0
 	countdown.value = 0.0
 
-	var hands: Dictionary = p.get("hands", {})
+	var hands := JsonSafe.dict(p, "hands")
 	var line := ""
 	for uid in hands.keys():
 		line += "%s %s   " % [name_of(str(uid)), HAND_ICON.get(int(hands[uid]), "?")]
@@ -2859,14 +2907,14 @@ func _on_round_result(p: Dictionary) -> void:
 	var winner := int(p.get("winner", 0))
 	result.append_text("[b]%s %s 胜[/b]\n" % [HAND_ICON[winner], HAND_NAME[winner]])
 
-	var eliminated: Array = p.get("eliminated", [])
+	var eliminated := JsonSafe.arr(p, "eliminated")
 	if not eliminated.is_empty():
 		var names := PackedStringArray()
 		for uid in eliminated:
 			names.append(name_of(str(uid)))
 		result.append_text("[color=red]淘汰:%s[/color]\n" % ", ".join(names))
 
-	var afk: Array = p.get("afk", [])
+	var afk := JsonSafe.arr(p, "afk")
 	if not afk.is_empty():
 		var names := PackedStringArray()
 		for uid in afk:

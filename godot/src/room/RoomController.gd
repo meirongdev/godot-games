@@ -46,7 +46,7 @@ func _on_room_event(op_code: int, payload: Dictionary) -> void:
 
 
 func _apply_room_state(payload: Dictionary) -> void:
-	_players = payload.get("players", [])
+	_players = JsonSafe.arr(payload, "players")
 	_host    = str(payload.get("host", ""))
 	_phase   = str(payload.get("phase", "waiting"))
 
@@ -87,7 +87,7 @@ func _start_game(payload: Dictionary) -> void:
 
 
 func _end_game(payload: Dictionary) -> void:
-	var results: Array = payload.get("results", [])
+	var results := JsonSafe.arr(payload, "results")
 	if _game != null:
 		_game.game_ended(results)
 	if results.is_empty():

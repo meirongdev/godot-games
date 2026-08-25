@@ -46,7 +46,7 @@ func game_ended(results: Array) -> void:
 # ---------------------------------------------------------------- 回合
 
 func _on_round_begin(p: Dictionary) -> void:
-	_alive = p.get("alive", [])
+	_alive = JsonSafe.arr(p, "alive")
 	_thrown = false
 	_round_seconds = float(p.get("seconds", 3.0))
 	_time_left = _round_seconds
@@ -67,7 +67,7 @@ func _on_round_result(p: Dictionary) -> void:
 	_time_left = 0.0
 	countdown.value = 0.0
 
-	var hands: Dictionary = p.get("hands", {})
+	var hands := JsonSafe.dict(p, "hands")
 	var line := ""
 	for uid in hands.keys():
 		line += "%s %s   " % [name_of(str(uid)), HAND_ICON.get(int(hands[uid]), "?")]
@@ -80,14 +80,14 @@ func _on_round_result(p: Dictionary) -> void:
 	var winner := int(p.get("winner", 0))
 	result.append_text("[b]%s %s 胜[/b]\n" % [HAND_ICON[winner], HAND_NAME[winner]])
 
-	var eliminated: Array = p.get("eliminated", [])
+	var eliminated := JsonSafe.arr(p, "eliminated")
 	if not eliminated.is_empty():
 		var names := PackedStringArray()
 		for uid in eliminated:
 			names.append(name_of(str(uid)))
 		result.append_text("[color=red]淘汰:%s[/color]\n" % ", ".join(names))
 
-	var afk: Array = p.get("afk", [])
+	var afk := JsonSafe.arr(p, "afk")
 	if not afk.is_empty():
 		var names := PackedStringArray()
 		for uid in afk:

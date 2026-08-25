@@ -51,6 +51,19 @@ describe("rps 适配层", function()
     assert.equal(1, r.draw_streak)
   end)
 
+  it("ROUND_BEGIN 带上 draw_streak,客户端才能显示加速提示", function()
+    local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
+    rps.on_start(s, d, 0)
+    assert.equal(0, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+    rps.on_loop(s, d, 1, {                      -- 制造一次平局
+      mock.message("a", OP_THROW, { hand = 0 }),
+      mock.message("b", OP_THROW, { hand = 1 }),
+      mock.message("c", OP_THROW, { hand = 2 }),
+    })
+    rps.on_loop(s, d, 1000, {})                 -- 开下一轮
+    assert.equal(1, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+  end)
+
   it("连续平局时下一轮倒计时缩短", function()
     local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
     rps.on_start(s, d, 0)

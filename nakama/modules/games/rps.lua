@@ -38,6 +38,9 @@ local function begin_round(state, dispatcher, tick)
   dispatcher.broadcast_message(OP.ROUND_BEGIN, nk.json_encode({
     round = g.round, alive = g.alive,
     seconds = secs, deadline_tick = g.deadline,
+    -- 客户端要在回合开始时就显示「连续平局 ×N,加速」,
+    -- 所以 draw_streak 必须跟着 ROUND_BEGIN 走,不能只在 ROUND_RESULT 里发。
+    draw_streak = g.draw_streak,
   }))
 end
 
