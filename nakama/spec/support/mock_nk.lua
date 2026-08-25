@@ -3,7 +3,8 @@ local M = {}
 
 --- 安装假 nk。返回一个 calls 表,测试里可断言调用记录。
 function M.install()
-  local calls = { logs = {}, storage_writes = {} }
+  local calls = { logs = {}, storage_writes = {},
+                  match_creates = {}, match_lists = {} }
   package.loaded["nakama"] = {
     logger_info   = function(m) calls.logs[#calls.logs + 1] = m end,
     logger_error  = function(m) calls.logs[#calls.logs + 1] = m end,
@@ -11,6 +12,16 @@ function M.install()
     json_decode   = function(s) return require("dkjson").decode(s) end,
     storage_write = function(o) calls.storage_writes[#calls.storage_writes + 1] = o end,
     uuid_v4       = function() return "00000000-0000-4000-8000-000000000000" end,
+    match_create = function(module, params)
+      calls.match_creates[#calls.match_creates + 1] =
+        { module = module, params = params }
+      return "match-" .. #calls.match_creates
+    end,
+    match_list = function(limit, authoritative, label, min, max, query)
+      calls.match_lists[#calls.match_lists + 1] =
+        { limit = limit, query = query }
+      return calls.stub_matches or {}
+    end,
   }
   return calls
 end
