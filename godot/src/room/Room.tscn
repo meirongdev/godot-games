@@ -1,0 +1,55 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/room/RoomController.gd" id="1_script"]
+
+[node name="Room" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_script")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Header" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="RoomTitle" type="Label" parent="VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "房间"
+
+[node name="LeaveButton" type="Button" parent="VBox/Header"]
+layout_mode = 2
+text = "离开"
+
+[node name="Body" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PlayerPanel" type="VBoxContainer" parent="VBox/Body"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 0)
+
+[node name="PlayerList" type="ItemList" parent="VBox/Body/PlayerPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ReadyButton" type="CheckButton" parent="VBox/Body/PlayerPanel"]
+layout_mode = 2
+text = "准备"
+
+[node name="StartButton" type="Button" parent="VBox/Body/PlayerPanel"]
+layout_mode = 2
+text = "开始游戏"
+
+[node name="GameSlot" type="Control" parent="VBox/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Status" type="Label" parent="VBox"]
+layout_mode = 2
