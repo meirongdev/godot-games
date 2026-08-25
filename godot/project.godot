@@ -1,0 +1,13 @@
+config_version=5
+
+[application]
+config/name="Family Game Lobby"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+Nakama="*res://addons/com.heroiclabs.nakama/Nakama.gd"
+ServerConnection="*res://src/autoload/ServerConnection.gd"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
