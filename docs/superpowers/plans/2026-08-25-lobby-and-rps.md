@@ -2828,7 +2828,7 @@ Create `godot/src/games/rps/RpsGame.gd`:
 extends GameBase
 ## 石头剪刀布客户端。只负责显示和发送出拳,胜负一律由服务端裁定。
 
-const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌" }
+const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌️" }
 const HAND_NAME := { 0: "石头", 1: "布", 2: "剪刀" }
 
 @onready var round_label: Label = $VBox/RoundLabel
@@ -3066,6 +3066,27 @@ git merge --no-ff feat/lobby-and-rps -m "feat: game lobby with rock-paper-scisso
 - [ ] 连续平局时倒计时可见地缩短
 - [ ] 中途关窗口不影响其他人
 - [ ] 房间列表在大厅侧 3 秒内反映房间状态
+
+## 布局教训(M4 做成语接龙时照这个来)
+
+第一版所有 `.tscn` 只写了节点树,没写任何尺寸属性。结果是所有控件都取 Godot 的默认最小尺寸——
+表单只有 90px 宽,几个小方块飘在大片空白里,完全没法用。而这一点**解析检查和节点路径检查都发现不了**,
+因为语法和结构都是对的。
+
+必须显式设定的东西:
+
+| 项目 | 做法 |
+|---|---|
+| 全局字号 | `godot/src/ui/family.tres` 一个 Theme 管所有,别逐节点覆盖 |
+| 窗口缩放 | `project.godot` 的 `stretch/mode="canvas_items"` + `aspect="expand"`,不设的话窗口放大只是留白变多 |
+| 页面留白 | 根容器用 anchor `offset_*` 内缩(**不要插 MarginContainer** —— `.gd` 里的 `$Path` 是硬编码的,加节点会全断) |
+| 触摸目标 | 按钮/输入框 `custom_minimum_size` 至少 48–56px 高,手机上才点得中 |
+| 该扩展的区域 | `size_flags_vertical = 3`,否则 ItemList / RichTextLabel 会被压成 0 高 |
+| RichTextLabel | 默认**没有背景**,不给 `theme_override_styles/normal` 就是隐形的 |
+| emoji | `✌` (U+270C) 默认是文字呈现会渲染成线框,要加变体选择符 `✌️` (U+FE0F) |
+
+验证手段:`Godot --path godot --write-movie /tmp/shot.png --quit-after 10` 能直接出截图,
+配合临时改 `run/main_scene` 可以拍任意场景。这是唯一能发现视觉问题的办法。
 
 ## 本计划刻意不做(与 spec 的已知偏差)
 

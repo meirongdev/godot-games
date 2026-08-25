@@ -1,55 +1,77 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://src/room/RoomController.gd" id="1_script"]
+[ext_resource type="Script" path="res://src/room/RoomController.gd" id="1_room"]
 
 [node name="Room" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-script = ExtResource("1_script")
+script = ExtResource("1_room")
 
 [node name="VBox" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+theme_override_constants/separation = 12
 
 [node name="Header" type="HBoxContainer" parent="VBox"]
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 
 [node name="RoomTitle" type="Label" parent="VBox/Header"]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 28
 text = "房间"
 
 [node name="LeaveButton" type="Button" parent="VBox/Header"]
+custom_minimum_size = Vector2(110, 44)
 layout_mode = 2
+size_flags_vertical = 4
 text = "离开"
 
 [node name="Body" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
 size_flags_vertical = 3
+theme_override_constants/separation = 20
 
 [node name="PlayerPanel" type="VBoxContainer" parent="VBox/Body"]
+custom_minimum_size = Vector2(300, 0)
 layout_mode = 2
-custom_minimum_size = Vector2(200, 0)
+theme_override_constants/separation = 10
 
 [node name="PlayerList" type="ItemList" parent="VBox/Body/PlayerPanel"]
 layout_mode = 2
 size_flags_vertical = 3
+theme_override_font_sizes/font_size = 22
 
 [node name="ReadyButton" type="CheckButton" parent="VBox/Body/PlayerPanel"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_font_sizes/font_size = 22
 text = "准备"
 
 [node name="StartButton" type="Button" parent="VBox/Body/PlayerPanel"]
+custom_minimum_size = Vector2(0, 56)
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "开始游戏"
 
 [node name="GameSlot" type="Control" parent="VBox/Body"]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="Status" type="Label" parent="VBox"]
+custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+autowrap_mode = 2

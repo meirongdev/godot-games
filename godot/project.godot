@@ -9,6 +9,19 @@ run/main_scene="res://src/lobby/Login.tscn"
 Nakama="*res://addons/com.heroiclabs.nakama/Nakama.gd"
 ServerConnection="*res://src/autoload/ServerConnection.gd"
 
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=800
+; canvas_items + expand:UI 跟着窗口缩放,同时适应不同宽高比。
+; 不设的话内容固定在基准分辨率的左上角尺寸,窗口放大只是留白变多。
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[gui]
+
+theme/custom="res://src/ui/family.tres"
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
