@@ -1,0 +1,14 @@
+# Godot
+godot/.godot/
+godot/.import/
+godot/export.cfg
+godot/export_presets.cfg
+godot/android/
+
+# 本机连接配置(含 homelab 地址与 server_key)
+godot/nakama.cfg
+
+# Nakama 数据卷
+nakama/data/
+
+.DS_Store
