@@ -210,6 +210,7 @@ services:
         --database.address postgres:localdb@postgres:5432/nakama
         --socket.server_key "family-lobby-2026"
         --session.token_expiry_sec 7200
+        --runtime.lua_min_count 1
         --runtime.lua_max_count 4
         --logger.level DEBUG
     volumes:
@@ -228,6 +229,10 @@ volumes:
 ```
 
 `--runtime.lua_max_count 4` 是 spec §11 的要求:默认最多 48 个 Lua VM,M4 加载 1.12MB 词库后会吃掉 ~430MB。家用 4 个够。
+
+> ⚠️ **`--runtime.lua_min_count 1` 必须一起给。** Nakama 的 `lua_min_count` 默认是 16,而它会校验 `min <= max`,只调 max 会让容器直接启动失败退出:
+> `Minimum Lua runtime instance count must be less than or equal to maximum`
+> 这是实施时踩出来的,别删这行。
 
 - [ ] **Step 4: 写 busted 配置**
 

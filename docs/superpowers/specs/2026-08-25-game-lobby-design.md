@@ -387,10 +387,12 @@ Nakama 的 Lua VM 是池化的(默认最多 48 个),每个 VM 都会加载全部
 
 ```
 48 VM × ~9 MB ≈ 430 MB   ← 默认配置,家用服务器吃不消
- 4 VM × ~9 MB ≈  36 MB   ← 加 --runtime.lua_max_count 4
+ 4 VM × ~9 MB ≈  36 MB   ← 加 --runtime.lua_min_count 1 --runtime.lua_max_count 4
 ```
 
 家庭规模用 4 个 VM 绰绰有余。写进部署文档。
+
+⚠️ **两个参数必须成对给。** `lua_min_count` 默认 16,Nakama 会校验 `min <= max`,只设 max 会让服务启动失败。
 
 ## 12. 里程碑
 
