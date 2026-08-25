@@ -34,4 +34,24 @@ function M.split(hands, winner)
   return advanced, eliminated
 end
 
+local COUNTDOWN_BASE  = 3.0
+local COUNTDOWN_STEP  = 0.5
+local COUNTDOWN_FLOOR = 1.5
+local REVEAL_DRAW     = 0.4
+local REVEAL_ELIMINATE = 2.0
+
+--- 本轮倒计时秒数。连续平局时递减,制造加速感。
+-- @param draw_streak number 已连续平局的次数(出现淘汰后重置为 0)
+function M.countdown_for(draw_streak)
+  local v = COUNTDOWN_BASE - COUNTDOWN_STEP * draw_streak
+  if v < COUNTDOWN_FLOOR then return COUNTDOWN_FLOOR end
+  return v
+end
+
+--- 揭晓阶段的展示秒数。平局只闪一下,不放淘汰动画。
+function M.reveal_for(is_draw)
+  if is_draw then return REVEAL_DRAW end
+  return REVEAL_ELIMINATE
+end
+
 return M
