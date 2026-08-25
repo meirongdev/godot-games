@@ -1,0 +1,53 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/games/rps/RpsGame.gd" id="1_script"]
+
+[node name="RpsGame" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_script")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="RoundLabel" type="Label" parent="VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="Countdown" type="ProgressBar" parent="VBox"]
+layout_mode = 2
+show_percentage = false
+
+[node name="Hands" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+alignment = 1
+
+[node name="RockButton" type="Button" parent="VBox/Hands"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 80)
+text = "✊"
+
+[node name="PaperButton" type="Button" parent="VBox/Hands"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 80)
+text = "✋"
+
+[node name="ScissorButton" type="Button" parent="VBox/Hands"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 80)
+text = "✌"
+
+[node name="Result" type="RichTextLabel" parent="VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+
+[node name="Spectator" type="Label" parent="VBox"]
+layout_mode = 2
+visible = false
+text = "你已出局,观战中"
