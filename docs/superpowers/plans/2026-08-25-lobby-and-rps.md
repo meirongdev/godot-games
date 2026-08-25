@@ -1872,8 +1872,11 @@ curl -s -X POST "http://127.0.0.1:7350/v2/rpc/list_rooms" \
 ```
 
 Expected:
-第一条返回 `{"match_id":"<uuid>.nakama1","name":"客厅"}`
+第一条返回 `{"match_id":"<uuid>.nakama","name":"客厅"}`(后缀是节点名;compose 没设 `--name`,所以是 `nakama`)
 第二条返回含该房间的 `{"rooms":[{"match_id":"...","game":"rps","name":"客厅","count":0,...}]}`
+
+> ⚠️ **`match_create` 到 `match_list` 可见有约 0.9–1.5 秒索引延迟**(实测,Nakama match registry 的固有行为,不是代码问题)。紧接着 `create_room` 查 `list_rooms` 很可能看不到自己刚建的房。等 1.5 秒再查,或重试几次。
+> 另外**空列表会返回 `{"rooms":{}}` 而不是 `{"rooms":[]}`** —— Lua 空表编码歧义,客户端必须归一化。
 
 **这一步通过 = 整个服务端跑通了。**
 
@@ -2122,7 +2125,12 @@ func list_rooms_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("rooms", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	# ⚠️ Lua 分不清空表和空数组,服务端空列表会编码成 {} 而不是 []。
+	# 不归一化的话这里会拿到 Dictionary,后面所有数组操作都是碰运气。
+	var rooms = payload.get("rooms", [])
+	return rooms if rooms is Array else []
 
 
 func list_games_async() -> Array:
@@ -2130,7 +2138,10 @@ func list_games_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("games", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	var games = payload.get("games", [])
+	return games if games is Array else []
 
 
 ## 建房并直接进去。返回 match_id,失败返回空串。
@@ -2469,7 +2480,7 @@ godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无
 Expected:
 1. 两边的「在线」列表都显示两个名字
 2. 一边发聊天,另一边立刻看到
-3. 一边建房,**3 秒内**另一边的房间列表出现该房间
+3. 一边建房,**约 5 秒内**另一边的房间列表出现该房间(3 秒轮询间隔 + 最多 1.5 秒服务端索引延迟)
 4. 建房的那边会因为 `Room.tscn` 不存在而报错 —— 下个任务建
 
 - [ ] **Step 7: 提交**
@@ -2953,8 +2964,8 @@ Expected:
 一边在房间里玩,另一边留在大厅。
 
 Expected:
-1. 大厅那边的房间列表 3 秒内把该房间标成 `[进行中]` 且置灰不可点
-2. 局终回到 waiting 后,3 秒内恢复成可加入
+1. 大厅那边的房间列表约 5 秒内把该房间标成 `[进行中]` 且置灰不可点
+2. 局终回到 waiting 后,约 5 秒内恢复成可加入
 
 - [ ] **Step 7: 合并**
 
