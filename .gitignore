@@ -12,3 +12,6 @@ godot/nakama.cfg
 nakama/data/
 
 .DS_Store
+
+# Web 导出产物(38MB wasm,不进仓库)
+build/
