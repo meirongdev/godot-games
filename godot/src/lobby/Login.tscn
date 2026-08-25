@@ -1,0 +1,34 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/lobby/Login.gd" id="1_login"]
+
+[node name="Login" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_login")
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Box" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Center/Box"]
+layout_mode = 2
+text = "家庭游戏大厅"
+
+[node name="NameEdit" type="LineEdit" parent="Center/Box"]
+layout_mode = 2
+placeholder_text = "你的名字"
+
+[node name="EnterButton" type="Button" parent="Center/Box"]
+layout_mode = 2
+text = "进入大厅"
+
+[node name="Status" type="Label" parent="Center/Box"]
+layout_mode = 2
