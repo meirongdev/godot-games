@@ -1955,6 +1955,8 @@ var host := "127.0.0.1"
 var port := 7350
 var scheme := "http"
 var server_key := "family-lobby-2026"
+## 同机联调用:附加到设备 ID 后面,让多个实例登进不同账号
+var device_suffix := ""
 
 static func load_or_default() -> NakamaConfig:
 	var cfg := NakamaConfig.new()
@@ -1970,6 +1972,10 @@ static func load_or_default() -> NakamaConfig:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--nakama-host="):
 			cfg.host = arg.split("=", true, 1)[1]
+		# 设备认证按机器 ID,同机多实例会撞成同一个账号。
+		#   godot --path godot -- --device-suffix=2
+		elif arg.begins_with("--device-suffix="):
+			cfg.device_suffix = arg.split("=", true, 1)[1]
 	return cfg
 ```
 
@@ -2030,10 +2036,12 @@ var _socket: NakamaSocket
 var _lobby_channel := ""
 var _match_id := ""
 var _lobby_users := {}   # user_id -> username
+var _config: NakamaConfig
 
 
 func _ready() -> void:
-	var cfg := NakamaConfig.load_or_default()
+	_config = NakamaConfig.load_or_default()
+	var cfg := _config
 	_client = Nakama.create_client(cfg.server_key, cfg.host, cfg.port, cfg.scheme)
 	_client.timeout = 10
 	_client.auto_refresh = true
@@ -2043,7 +2051,10 @@ func _ready() -> void:
 
 ## 设备认证。家庭局不需要注册流程,一键进。
 func login_async() -> int:
-	var session = await _client.authenticate_device_async(Nakama.get_device_id())
+	var device_id := Nakama.get_device_id()
+	if not _config.device_suffix.is_empty():
+		device_id += "-" + _config.device_suffix
+	var session = await _client.authenticate_device_async(device_id)
 	var err := _check(session)
 	if err == OK:
 		_session = session
@@ -2485,7 +2496,7 @@ func _on_create_pressed() -> void:
 godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
-然后在 Godot 里 Debug → Run Multiple Instances → 2,F5,两个窗口各输一个名字进大厅。
+然后开两个实例(要加 `--device-suffix`,见 Task 13),各输一个名字进大厅。
 
 Expected:
 1. 两边的「在线」列表都显示两个名字
@@ -2717,7 +2728,7 @@ Expected: `无脚本错误`(`RpsGame.tscn` 还不存在,但 `load()` 是运行�
 
 - [ ] **Step 5: 手工验证房间流程**
 
-Run Multiple Instances → 2,两边进大厅,一边建房、另一边双击加入。
+开两个实例(同样要加 `--device-suffix`,见 Task 13),两边进大厅,一边建房、另一边双击加入。
 
 Expected:
 1. 两边都进 Room 场景,玩家列表显示两个人
@@ -2899,7 +2910,7 @@ Expected: `无脚本错误`
 
 - [ ] **Step 4: 两人对局验证**
 
-Run Multiple Instances → 2,两边进同一个房间,都准备,房主开始。
+开两个实例(同样要加 `--device-suffix`,见 Task 13),进同一房间,都准备,房主开始。
 
 Expected:
 1. 两边同时看到「第 1 轮 · 剩 2 人」和倒计时条
@@ -2940,7 +2951,16 @@ Expected: `服务端无错误`
 
 - [ ] **Step 3: 三人局验证平局加速**
 
-Run Multiple Instances → **3**,三人进同一房间开局。
+开三个实例。**不能直接用 `Run Multiple Instances`** —— 设备认证按机器 ID,三个窗口会登进同一个账号,服务端当成同一个人重连,多人测不了。用命令行加设备后缀:
+
+```bash
+cd /Users/matthew/projects/meirongdev/godot-games
+godot --path godot -- --device-suffix=a &
+godot --path godot -- --device-suffix=b &
+godot --path godot -- --device-suffix=c &
+```
+
+三人进同一房间开局。
 
 三人局的平局率是 33%,多打几轮一定能撞上连续平局。
 

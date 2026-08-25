@@ -19,10 +19,12 @@ var _socket: NakamaSocket
 var _lobby_channel := ""
 var _match_id := ""
 var _lobby_users := {}   # user_id -> username
+var _config: NakamaConfig
 
 
 func _ready() -> void:
-	var cfg := NakamaConfig.load_or_default()
+	_config = NakamaConfig.load_or_default()
+	var cfg := _config
 	_client = Nakama.create_client(cfg.server_key, cfg.host, cfg.port, cfg.scheme)
 	_client.timeout = 10
 	_client.auto_refresh = true
@@ -32,7 +34,10 @@ func _ready() -> void:
 
 ## 设备认证。家庭局不需要注册流程,一键进。
 func login_async() -> int:
-	var session = await _client.authenticate_device_async(Nakama.get_device_id())
+	var device_id := Nakama.get_device_id()
+	if not _config.device_suffix.is_empty():
+		device_id += "-" + _config.device_suffix
+	var session = await _client.authenticate_device_async(device_id)
 	var err := _check(session)
 	if err == OK:
 		_session = session

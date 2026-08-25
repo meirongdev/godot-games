@@ -7,6 +7,8 @@ var host := "127.0.0.1"
 var port := 7350
 var scheme := "http"
 var server_key := "family-lobby-2026"
+## 同机联调用:附加到设备 ID 后面,让多个实例登进不同账号
+var device_suffix := ""
 
 static func load_or_default() -> NakamaConfig:
 	var cfg := NakamaConfig.new()
@@ -22,4 +24,8 @@ static func load_or_default() -> NakamaConfig:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--nakama-host="):
 			cfg.host = arg.split("=", true, 1)[1]
+		# 设备认证按机器 ID,同机多实例会撞成同一个账号。
+		#   godot --path godot -- --device-suffix=2
+		elif arg.begins_with("--device-suffix="):
+			cfg.device_suffix = arg.split("=", true, 1)[1]
 	return cfg
