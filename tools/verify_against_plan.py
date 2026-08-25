@@ -13,7 +13,7 @@ s = io.open(PLAN, encoding='utf-8').read()
 blocks = {}
 for m in re.finditer(r'(?:Create|Replace) `([^`]+)`[^\n]*:\n+```[a-z]*\n(.*?)\n```', s, re.S):
     path, body = m.group(1), m.group(2)
-    blocks.setdefault(path, body)   # 同名只取第一次(后续是增量步骤)
+    blocks[path] = body   # 同名取最后一次(后续步骤可能整体替换)
 
 targets = sys.argv[1:] or sorted(blocks)
 rc = 0

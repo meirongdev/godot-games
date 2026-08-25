@@ -23,6 +23,8 @@
 | **Godot** | ❌ **未装,Task 0 装** |
 | **本机 Lua / busted** | ❌ 未装,**不装** —— 走 Docker |
 
+Godot 的解析检查**必须带 `--editor`**,否则在主场景就位前它是个空操作(见 Task 9 Step 8)。
+
 Lua 测试跑在 `imega/busted` 容器里,实测 `_VERSION = Lua 5.1`,与 Nakama 的 GopherLua 语义一致。镜像是 amd64,在 Apple Silicon 上走模拟,会打印一行 platform warning —— **属正常,不是错误**,加 `--platform linux/amd64` 可让它闭嘴。实测单次跑 ~1.6ms。
 
 ---
@@ -2221,9 +2223,17 @@ func _check(result) -> int:
 
 - [ ] **Step 8: 解析检查**
 
+> ⚠️ **`--editor` 不能省。** 不加它的话,Godot 在加载任何脚本**之前**就因为「没有主场景」退出了 —— 正确代码和语法错误代码的输出**逐字节相同**,这条检查等于没做。已用故障注入验证:
+> ```
+> 无 --editor,正确代码:  Error: Can't run project: no main scene defined
+> 无 --editor,注入语法错误:Error: Can't run project: no main scene defined   ← 一样
+> 加 --editor,注入语法错误:SCRIPT ERROR: Parse Error: Expected parameter name.
+> ```
+> Task 10 设了 `run/main_scene` 之后不加也能用,但 `--editor` 一直是更彻底的检查(它会完整扫描项目、注册全局类、编译所有 autoload)。
+
 ```bash
 cd /Users/matthew/projects/meirongdev/godot-games
-godot --headless --path godot --quit 2>&1 | grep -iE "error|SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`
@@ -2472,7 +2482,7 @@ func _on_create_pressed() -> void:
 - [ ] **Step 6: 解析检查 + 手工验证**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 然后在 Godot 里 Debug → Run Multiple Instances → 2,F5,两个窗口各输一个名字进大厅。
@@ -2700,7 +2710,7 @@ func _error_text(code: String) -> String:
 - [ ] **Step 4: 解析检查**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`(`RpsGame.tscn` 还不存在,但 `load()` 是运行时才解析,不影响)
@@ -2882,7 +2892,7 @@ func _process(delta: float) -> void:
 - [ ] **Step 3: 解析检查**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`
