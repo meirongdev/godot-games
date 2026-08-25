@@ -116,7 +116,12 @@ func list_rooms_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("rooms", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	# ⚠️ Lua 分不清空表和空数组,服务端空列表会编码成 {} 而不是 []。
+	# 不归一化的话这里返回 Dictionary,而签名是 -> Array,运行时直接报错。
+	var rooms = payload.get("rooms", [])
+	return rooms if rooms is Array else []
 
 
 func list_games_async() -> Array:
@@ -124,7 +129,10 @@ func list_games_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("games", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	var games = payload.get("games", [])
+	return games if games is Array else []
 
 
 ## 建房并直接进去。返回 match_id,失败返回空串。

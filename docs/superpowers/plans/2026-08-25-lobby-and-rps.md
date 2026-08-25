@@ -2130,7 +2130,7 @@ func list_rooms_async() -> Array:
 	if not (payload is Dictionary):
 		return []
 	# ⚠️ Lua 分不清空表和空数组,服务端空列表会编码成 {} 而不是 []。
-	# 不归一化的话这里会拿到 Dictionary,后面所有数组操作都是碰运气。
+	# 不归一化的话这里返回 Dictionary,而签名是 -> Array,运行时直接报错。
 	var rooms = payload.get("rooms", [])
 	return rooms if rooms is Array else []
 
