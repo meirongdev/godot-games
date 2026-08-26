@@ -17,6 +17,8 @@
 
 ## 本地开发
 
+测试分 7 层(单测→解析→节点路径→e2e→截图→真玩→Web),见 **[docs/testing.md](docs/testing.md)**。速览:
+
 ```bash
 cd nakama && docker compose up -d      # Nakama + Postgres
 cd nakama && docker run --rm -v "$PWD:/work" -w /work imega/busted   # 66 项单测
@@ -40,5 +42,6 @@ docs/             学习指南 / 设计 spec / 实现计划 / 部署契约
 ## 文档
 
 - [nakama-godot-guide.md](docs/nakama-godot-guide.md) — Godot 4 接入 Nakama 完整指南
+- [testing.md](docs/testing.md) — 本地测试分层与坑
 - [deployment-contract.md](docs/deployment-contract.md) — 与部署仓库的契约
 - [superpowers/specs/](docs/superpowers/specs/) · [superpowers/plans/](docs/superpowers/plans/) — 设计与实现记录
