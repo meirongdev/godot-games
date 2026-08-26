@@ -22,7 +22,7 @@ const CHECKS := {
 		"HBox/Left/OnlineList", "HBox/Left/ChatLog", "HBox/Left/ChatEdit",
 		"HBox/Right/RoomList", "HBox/Right/RefreshButton",
 		"HBox/Right/CreateBox/GameOption", "HBox/Right/CreateBox/RoomNameEdit",
-		"HBox/Right/CreateBox/CreateButton",
+		"HBox/Right/CreateBox/CreateButton", "HBox/Right/Status",
 	],
 	"res://src/room/Room.tscn": [
 		"VBox/Header/RoomTitle", "VBox/Header/LeaveButton",

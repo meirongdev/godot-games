@@ -1,10 +1,20 @@
 -- 大厅 RPC。客户端不直接 match_create,一律走这里,服务端校验。
 local nk    = require("nakama")
 local games = require("games.init")
+local rate  = require("rules.rate_limit")
 
 local M = {}
 
 local NAME_MAX = 32
+
+-- 建房限流。create_room 是开放 RPC(契约 §5),而 server key 跟着 Web 制品
+-- 公开发布 —— 所以「拿到 key 的人」就是「任何人」,这里才是实际防线。
+local CREATE_WINDOW_MS = 60000
+local CREATE_MAX       = 5
+-- ⚠️ 状态在 Lua VM 内存里,每个 VM 一份。契约 §3.2 建议 lua_max_count=4,
+-- 最坏情况实际上限是 4 × CREATE_MAX。家庭规模够用;要精确就得挪到
+-- nk.storage,代价是每次建房多一次读 + 一次写。
+local create_stamps = {}   -- user_id -> {毫秒时间戳}
 
 local function utf8_trim(s, max_bytes)
   if #s <= max_bytes then return s end
@@ -24,6 +34,18 @@ function M.create_room(ctx, payload)
   local ok, req = pcall(nk.json_decode, payload)
   if not ok or type(req) ~= "table" then return err("bad_payload") end
   if not games.exists(req.game) then return err("unknown_game") end
+
+  -- 限流放在校验之后:畸形请求不该消耗额度,每次真的建房才算一次。
+  local uid = ctx.user_id
+  local allowed, kept, retry_ms = rate.check(
+    create_stamps[uid], nk.time(), CREATE_WINDOW_MS, CREATE_MAX)
+  create_stamps[uid] = (#kept > 0) and kept or nil
+  if not allowed then
+    return nk.json_encode({
+      error = "rate_limited",
+      retry_after = math.ceil(retry_ms / 1000),
+    })
+  end
 
   local name = req.name
   if name == nil or name == "" then

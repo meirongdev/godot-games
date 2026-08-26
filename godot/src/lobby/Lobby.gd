@@ -10,6 +10,7 @@ const REFRESH_INTERVAL := 3.0   # Nakama 没有房间列表推送,只能轮询
 @onready var game_option: OptionButton = $HBox/Right/CreateBox/GameOption
 @onready var room_name_edit: LineEdit = $HBox/Right/CreateBox/RoomNameEdit
 @onready var create_button: Button = $HBox/Right/CreateBox/CreateButton
+@onready var status: Label = $HBox/Right/Status
 
 var _rooms: Array = []
 var _timer := 0.0
@@ -24,6 +25,7 @@ func _ready() -> void:
 	create_button.pressed.connect(_on_create_pressed)
 	chat_edit.text_submitted.connect(_on_chat_submitted)
 	room_list.item_activated.connect(_on_room_activated)
+	status.text = ""
 
 	await ServerConnection.join_lobby_async()
 	await _load_games()
@@ -97,15 +99,22 @@ func _on_room_activated(index: int) -> void:
 		return
 	if await ServerConnection.join_room_async(_rooms[index]["match_id"]) == OK:
 		get_tree().change_scene_to_file("res://src/room/Room.tscn")
+	else:
+		status.text = "进房失败:%s" % ServerConnection.error_message
 
 
 func _on_create_pressed() -> void:
 	if game_option.selected < 0:
 		return
 	create_button.disabled = true
+	status.text = ""
 	var game_id: String = game_option.get_item_metadata(game_option.selected)
 	var id := await ServerConnection.create_room_async(
 		game_id, room_name_edit.text.strip_edges())
 	create_button.disabled = false
 	if not id.is_empty():
 		get_tree().change_scene_to_file("res://src/room/Room.tscn")
+	else:
+		# 以前这里是完全静默的 —— 点「建房」没反应,用户不知道发生了什么。
+		# 服务端的拒绝(限流、未知游戏)必须有出口。
+		status.text = ServerConnection.error_message

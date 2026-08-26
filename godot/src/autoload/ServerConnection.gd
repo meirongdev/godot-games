@@ -25,15 +25,29 @@ var _config: NakamaConfig
 func _ready() -> void:
 	_config = NakamaConfig.load_or_default()
 	var cfg := _config
+	if not cfg.error.is_empty():
+		# 配置没确定就不建 client。宁可一进门就报错,也不要拿一个错地址
+		# 去连然后给用户看「连接超时」—— 那是 2026-08-26 那个故障的形状。
+		error_message = cfg.error
+		push_error("[config] %s" % cfg.error)
+		return
 	_client = Nakama.create_client(cfg.server_key, cfg.host, cfg.port, cfg.scheme)
 	_client.timeout = 10
 	_client.auto_refresh = true
+	print("[config] %s://%s:%d" % [cfg.scheme, cfg.host, cfg.port])
+
+
+## 配置是否可用。false 时 error_message 里是给用户看的原因。
+func is_configured() -> bool:
+	return _client != null
 
 
 # ---------------------------------------------------------------- 认证
 
 ## 设备认证。家庭局不需要注册流程,一键进。
 func login_async() -> int:
+	if not is_configured():
+		return ERR_UNCONFIGURED
 	var device_id := Nakama.get_device_id()
 	if not _config.device_suffix.is_empty():
 		device_id += "-" + _config.device_suffix
@@ -150,11 +164,27 @@ func create_room_async(game: String, name: String) -> String:
 	if _check(res) != OK:
 		return ""
 	var payload = JSON.parse_string(res.payload)
-	if not (payload is Dictionary) or payload.has("error"):
-		error_message = str(payload.get("error", "unknown")) if payload is Dictionary else "bad payload"
+	if not (payload is Dictionary):
+		error_message = "服务器回了看不懂的东西"
+		return ""
+	if payload.has("error"):
+		error_message = _rpc_error(payload)
 		return ""
 	var id: String = payload["match_id"]
 	return id if await join_room_async(id) == OK else ""
+
+
+## 服务端错误码翻成给家里人看的话。认不出的码原样透出,好排查。
+func _rpc_error(payload: Dictionary) -> String:
+	var code := str(payload.get("error", "unknown"))
+	match code:
+		"rate_limited":
+			return "建房太频繁了,%d 秒后再试" % int(payload.get("retry_after", 60))
+		"unknown_game":
+			return "这个游戏认不出来"
+		"bad_payload":
+			return "请求格式不对"
+	return code
 
 
 func join_room_async(match_id: String) -> int:

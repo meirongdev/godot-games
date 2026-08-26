@@ -52,15 +52,11 @@ jobs:
           mkdir -p "$HOME/.local/share/godot/export_templates"
           mv templates "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
 
-      - name: Export web build
-        run: |
-          set -euo pipefail
-          mkdir -p build/web
-          # 首次运行要先导入资源,否则导出会缺资源。--import 跑完再导出。
-          godot --headless --path godot --import || true
-          godot --headless --path godot --export-release "Web" ../build/web/index.html
-          ls -lh build/web
-          test -s build/web/index.wasm
+      # 刻意调本地那个脚本,不在这里另写一串 godot 命令 —— 只留一条导出路径。
+      # 场景路径检查、制品自检(无测试脚手架、无 nakama.cfg)都在脚本里,
+      # 跟模块镜像先跑 busted 一样:检查不过就不推。
+      - name: Export web build + checks
+        run: GODOT=/usr/local/bin/godot tools/build_web.sh
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -86,6 +82,29 @@ jobs:
             ghcr.io/meirongdev/godot-games-web:${{ steps.sha.outputs.short }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 契约 §2 交付的是「集群能拉到的镜像」。ghcr 包默认 private,匿名拉 403,
+      # 而部署侧没有 imagePullSecret 只能匿名拉 —— 这个开关 2026-08-26 漏过一次,
+      # 两个包都是 private,homelab 直接卡住。没门禁的手动步骤就会漏,所以这里验。
+      - name: Verify anonymous pull
+        env:
+          PKG: godot-games-web
+          TAG: ${{ steps.sha.outputs.short }}
+        run: |
+          set -euo pipefail
+          REPO="meirongdev/${PKG}"
+          TOKEN=$(curl -sS "https://ghcr.io/token?service=ghcr.io&scope=repository:${REPO}:pull" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${REPO}/manifests/${TAG}")
+          if [ "$CODE" != "200" ]; then
+            echo "::error::匿名拉 ghcr.io/${REPO}:${TAG} 返回 ${CODE} —— 包还是 private,集群拉不到。到 https://github.com/users/meirongdev/packages/container/${PKG}/settings 把可见性改成 Public,然后重跑本 workflow"
+            exit 1
+          fi
+          echo "匿名可拉 ✓ ghcr.io/${REPO}:${TAG}"
 
       - name: 部署提示
         run: |

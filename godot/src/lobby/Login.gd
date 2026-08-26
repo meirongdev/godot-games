@@ -11,6 +11,10 @@ func _ready() -> void:
 	enter_button.pressed.connect(_on_enter_pressed)
 	name_edit.text = _load_name()
 	status.text = ""
+	# 配置坏了就别等用户填完名字再告诉他 —— 一进门就说,而且把按钮关掉。
+	if not ServerConnection.is_configured():
+		status.text = "连不上服务器:%s" % ServerConnection.error_message
+		enter_button.disabled = true
 
 
 func _on_enter_pressed() -> void:

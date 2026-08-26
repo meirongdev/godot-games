@@ -41,9 +41,11 @@
 
 ```bash
 cd nakama && docker compose up -d      # Nakama + Postgres
-cd nakama && docker run --rm -v "$PWD:/work" -w /work imega/busted   # 66 项单测
+cd nakama && docker run --rm -v "$PWD:/work" -w /work imega/busted   # 82 项单测
 python3 tools/e2e_match.py 3           # 三个真实账号打满一局
 ./tools/build_web.sh && python3 tools/serve_web.py   # http://localhost:8080/?player=a
+                                       # serve_web.py 把 /v2/* 和 /ws 反代到 Nakama,
+                                       # 拓扑与线上一致(见契约 §3.3.1)
 ```
 
 Godot 编辑器打开 `godot/`,F5 即玩(连本地 compose)。
@@ -63,5 +65,5 @@ docs/             学习指南 / 设计 spec / 实现计划 / 部署契约
 
 - [nakama-godot-guide.md](docs/nakama-godot-guide.md) — Godot 4 接入 Nakama 完整指南
 - [testing.md](docs/testing.md) — 本地测试分层与坑 · [最近一轮报告](docs/test-reports/2026-08-26.md)
-- [deployment-contract.md](docs/deployment-contract.md) — 与部署仓库的契约
+- [deployment-contract.md](docs/deployment-contract.md) — 与部署仓库的契约(§3.3.1 是部署侧必须加的路由)
 - [superpowers/specs/](docs/superpowers/specs/) · [superpowers/plans/](docs/superpowers/plans/) — 设计与实现记录

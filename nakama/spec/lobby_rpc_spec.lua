@@ -81,3 +81,50 @@ describe("list_games", function()
     assert.is_true(ids.rps)
   end)
 end)
+
+describe("create_room 限流", function()
+  -- 每个 case 换一个 user_id:lobby_rpc 的限流状态是模块级的,
+  -- 跨 it 不会重置(线上也一样,VM 活着就一直记着)。
+  local function ctx_for(uid) return { user_id = uid, username = "娃" } end
+  local function create(uid)
+    return nk.json_decode(lobby.create_room(ctx_for(uid),
+      nk.json_encode({ game = "rps", name = "x" })))
+  end
+
+  it("一分钟内第 6 次建房被拒,并给出还要等多久", function()
+    calls.now = 1000
+    for _ = 1, 5 do assert.is_nil(create("rl-a").error) end
+    local res = create("rl-a")
+    assert.equal("rate_limited", res.error)
+    assert.is_true(res.retry_after > 0)
+  end)
+
+  it("按 user_id 隔离,别人不受牵连", function()
+    calls.now = 1000
+    for _ = 1, 5 do create("rl-b") end
+    assert.equal("rate_limited", create("rl-b").error)
+    assert.is_nil(create("rl-c").error)
+  end)
+
+  it("窗口滚过去之后重新放行", function()
+    calls.now = 1000
+    for _ = 1, 5 do create("rl-d") end
+    assert.equal("rate_limited", create("rl-d").error)
+    calls.now = 1000 + 60000
+    assert.is_nil(create("rl-d").error)
+  end)
+
+  it("被拒时没有真的建出 match", function()
+    calls.now = 1000
+    for _ = 1, 5 do create("rl-e") end
+    local before = #calls.match_creates
+    create("rl-e")
+    assert.equal(before, #calls.match_creates)
+  end)
+
+  it("畸形 payload 不消耗额度", function()
+    calls.now = 1000
+    for _ = 1, 8 do lobby.create_room(ctx_for("rl-f"), "{{{") end
+    assert.is_nil(create("rl-f").error)
+  end)
+end)

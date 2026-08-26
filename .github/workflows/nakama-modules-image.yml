@@ -56,6 +56,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # 契约 §2 交付的是「集群能拉到的镜像」。ghcr 包默认 private,匿名拉 403,
+      # 而部署侧没有 imagePullSecret 只能匿名拉 —— 这个开关 2026-08-26 漏过一次,
+      # 两个包都是 private,homelab 直接卡住。没门禁的手动步骤就会漏,所以这里验。
+      - name: Verify anonymous pull
+        env:
+          PKG: godot-games-nakama-modules
+          TAG: ${{ steps.sha.outputs.short }}
+        run: |
+          set -euo pipefail
+          REPO="meirongdev/${PKG}"
+          TOKEN=$(curl -sS "https://ghcr.io/token?service=ghcr.io&scope=repository:${REPO}:pull" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${REPO}/manifests/${TAG}")
+          if [ "$CODE" != "200" ]; then
+            echo "::error::匿名拉 ghcr.io/${REPO}:${TAG} 返回 ${CODE} —— 包还是 private,集群拉不到。到 https://github.com/users/meirongdev/packages/container/${PKG}/settings 把可见性改成 Public,然后重跑本 workflow"
+            exit 1
+          fi
+          echo "匿名可拉 ✓ ghcr.io/${REPO}:${TAG}"
+
       - name: 部署提示
         run: |
           echo "::notice::homelab 侧把 nakama 的 copy-game-modules initContainer tag 换成 ${{ steps.sha.outputs.short }}"

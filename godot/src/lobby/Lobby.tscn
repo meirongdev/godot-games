@@ -99,3 +99,9 @@ placeholder_text = "房间名(留空自动起)"
 custom_minimum_size = Vector2(120, 0)
 layout_mode = 2
 text = "建房"
+
+[node name="Status" type="Label" parent="HBox/Right"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.63, 0.36, 1)
+theme_override_font_sizes/font_size = 18

@@ -18,13 +18,13 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 
 | 层 | 命令 | 耗时 | 抓什么 |
 |---|---|---|---|
-| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(70 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
+| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(82 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
 | 2 GDScript 解析 | `godot --headless --editor --path godot --quit 2>&1 \| grep -icE "SCRIPT ERROR\|Parse Error"`(应为 0) | ~5s | 语法/类型错误 |
 | 3 场景节点路径 | `godot --headless --path godot --script res://tests/check_scenes.gd` | ~3s | `.tscn` 节点名与 `.gd` 里 `$Path` 的错位(运行时才炸的那种) |
 | 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~15s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态 |
 | 5 场景截图 | 见下 | ~10s/景 | 布局灾难(缩成一团、区域被压成 0 高、控件隐形 —— 层 2/3 全都看不见) |
 | 6 桌面多开真玩 | `godot --path godot -- --device-suffix=a &`(b、c 同理) | 人肉 | 客户端运行时逻辑与手感 |
-| 7 Web 版 | `./tools/build_web.sh && python3 tools/serve_web.py` → `http://localhost:8080/?player=a` | ~1min | Web 特有问题(wasm、JS bridge、软键盘) |
+| 7 Web 版 | `./tools/build_web.sh && python3 tools/serve_web.py` → `http://localhost:8080/?player=a` | ~1min | Web 特有问题(wasm、JS bridge、软键盘)+ **同源拓扑**:serve_web.py 把 `/v2/*` 和 `/ws` 反代到 Nakama,和线上路由一致(契约 §3.3.1) |
 
 层 4 还能打线上(部署验证,不改源码):
 
@@ -42,6 +42,7 @@ NAKAMA_HOST=<域名> NAKAMA_PORT=443 NAKAMA_TLS=1 NAKAMA_KEY=<server_key> \
 | `godot/**.gd` | 2 + 3 | 6 |
 | `godot/**.tscn` | 3 | 5(布局改动肉眼确认) |
 | `images/**` 或导出相关 | 7 | 部署契约验证:`docs/deployment-contract.md` §4 |
+| `godot/export_presets.cfg` | 7 | 制品自检在 `tools/build_web.sh` 里,导出即跑 |
 
 ## 层 5:截图怎么拍
 
@@ -70,6 +71,11 @@ godot --path godot --write-movie /tmp/shots/f.png --quit-after 10
    被服务端当成同一个人重连,多人根本测不起来。
 5. **层 3 的 `Identifier not found: ServerConnection` 是已知噪音。** `--script` 模式
    下 autoload 未挂载;节点路径解析不受影响,以 `FAILURES` 行和退出码为准。
+6. **grep 导出制品里的字符串,永远是假阴性。** `export_presets.cfg` 是
+   `script_export_mode=2`(二进制 token + 压缩),GDScript 的字符串字面量不以明文
+   存在 —— `grep 127.0.0.1` / `grep family-lobby-2026` 在 `.pck`/`.wasm`/`.js` 里
+   都是 0 命中,**不论客户端是对是错**(2026-08-27 实测)。想验客户端连哪儿,
+   只能把它跑起来看请求。可以 grep 的是 pck 的路径表(`res://…`)。
 
 ## 这些层各自是怎么来的
 

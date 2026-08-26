@@ -3,8 +3,9 @@ local M = {}
 
 --- 安装假 nk。返回一个 calls 表,测试里可断言调用记录。
 function M.install()
+  -- calls.now 是测试可写的时钟(毫秒)。默认 0,想推进窗口就直接赋值。
   local calls = { logs = {}, storage_writes = {},
-                  match_creates = {}, match_lists = {} }
+                  match_creates = {}, match_lists = {}, now = 0 }
   package.loaded["nakama"] = {
     logger_info   = function(m) calls.logs[#calls.logs + 1] = m end,
     logger_error  = function(m) calls.logs[#calls.logs + 1] = m end,
@@ -12,6 +13,8 @@ function M.install()
     json_decode   = function(s) return require("dkjson").decode(s) end,
     storage_write = function(o) calls.storage_writes[#calls.storage_writes + 1] = o end,
     uuid_v4       = function() return "00000000-0000-4000-8000-000000000000" end,
+    -- Nakama 的 nk.time() 返回毫秒级 UTC 墙钟。测试里由 calls.now 驱动。
+    time          = function() return calls.now end,
     match_create = function(module, params)
       calls.match_creates[#calls.match_creates + 1] =
         { module = module, params = params }
