@@ -1,7 +1,7 @@
 extends GameBase
 ## 石头剪刀布客户端。只负责显示和发送出拳,胜负一律由服务端裁定。
 
-const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌️" }
+const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌" }
 const HAND_NAME := { 0: "石头", 1: "布", 2: "剪刀" }
 
 @onready var round_label: Label = $VBox/RoundLabel

@@ -2,6 +2,10 @@
 """生成文档截图:四个场景的「有内容」画面 → docs/screenshots/*.png
 
 前置: cd nakama && docker compose up -d(harness 要真实登录拿 user_id)
+
+⚠️ 这个脚本跑的是**桌面** Godot。桌面有系统字体回退,Web 导出没有 ——
+   所以截图看起来正常 ≠ Web 版正常。字体问题只有 tests/check_fonts.gd
+   和真开一次网页能抓到(2026-08-27 就是这么漏掉整套中文字体的)。
 原理: 临时把 main_scene 指向 tests/ShotHarness.tscn,movie 模式渲染,
       取最后一帧。SHOT 环境变量选场景。
 """

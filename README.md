@@ -54,10 +54,11 @@ Godot 编辑器打开 `godot/`,F5 即玩(连本地 compose)。
 
 ```
 godot/            Godot 4 客户端(ServerConnection 门面 + 场景)
+godot/src/ui/     主题 + 自带中文/emoji 子集字体(Web 没有系统字体回退,必须自带)
 nakama/modules/   服务端 Lua:rules/ 纯函数(全 TDD) + 适配层
 nakama/spec/      busted 单测(跑在 Lua 5.1 容器里,对齐 GopherLua)
 images/           发布制品的 Dockerfile
-tools/            e2e 测试、构建、截图等工具
+tools/            e2e 测试、构建、截图、字体子集化等工具
 docs/             学习指南 / 设计 spec / 实现计划 / 部署契约
 ```
 

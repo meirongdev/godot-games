@@ -28,6 +28,11 @@ echo "导入资源…"
 echo "场景路径检查…"
 "$GODOT" --headless --path godot --script res://tests/check_scenes.gd
 
+# 字体覆盖。Web 拿不到系统字体,主题里没有带汉字的字体就是满屏豆腐块,
+# 而桌面版靠系统回退看不出来 —— 必须在推制品之前挡住。
+echo "字体覆盖检查…"
+"$GODOT" --headless --path godot --script res://tests/check_fonts.gd
+
 echo "导出中…"
 "$GODOT" --headless --path godot --export-release "Web" ../build/web/index.html
 
@@ -46,6 +51,13 @@ fi
 # 那就等于把某个环境的地址烙进了镜像。
 if grep -qa 'nakama.cfg' build/web/index.pck; then
 	echo "✗ nakama.cfg 进了制品 —— Web 版不该携带任何环境地址" >&2
+	exit 1
+fi
+
+# 汉字字体必须真的在包里。check_fonts.gd 验的是主题配置,这条验的是导出结果 ——
+# 万一将来有人给 export_presets 加了把 ui/ 排掉的 filter,这里会拦住。
+if ! grep -qa 'NotoSansSC' build/web/index.pck; then
+	echo "✗ 制品里没有汉字字体 —— Web 版会满屏豆腐块" >&2
 	exit 1
 fi
 

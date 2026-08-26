@@ -1,0 +1,18 @@
+[gd_resource type="FontVariation" load_steps=3 format=3]
+
+; 家庭大厅的正文字体。两段回退链,**刻意不依赖系统字体** ——
+; .import 里的 allow_system_fallback 只在桌面/编辑器有效,Web 导出
+; 拿不到系统字体,靠它就是满屏豆腐块(2026-08-27 实测:内置的
+; Open Sans 连「客」都没有)。所以覆盖必须来自仓库里的字体资产本身。
+;
+;   base      NotoSansSC-Subset  汉字(GB2312 6763 字 + 标点全角,2.1MB)
+;   fallback  NotoEmoji-Subset   ✊✋✌🏆👑 等 UI 用到的符号(5.5KB)
+;
+; 缺字了怎么办:两个子集都由 tools/subset_fonts.sh 重新生成,别手工改。
+
+[ext_resource type="FontFile" uid="uid://dfajfiv2cp56a" path="res://src/ui/NotoSansSC-Subset.ttf" id="1_cjk"]
+[ext_resource type="FontFile" uid="uid://dduvm63l5idls" path="res://src/ui/NotoEmoji-Subset.ttf" id="2_emoji"]
+
+[resource]
+base_font = ExtResource("1_cjk")
+fallbacks = Array[Font]([ExtResource("2_emoji")])
