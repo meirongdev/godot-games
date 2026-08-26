@@ -77,6 +77,8 @@ describe("room.match_join", function()
     local st = mock.last(d, OP_ROOM_STATE)
     assert.equal(2, #st.players)
     assert.is_false(st.players[1].ready)
+    assert.equal("客厅", st.name)     -- 客户端标题依赖
+    assert.equal("rps", st.game)
   end)
 
   it("label 随人数更新", function()

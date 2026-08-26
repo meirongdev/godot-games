@@ -7,6 +7,7 @@ const HAND_NAME := { 0: "石头", 1: "布", 2: "剪刀" }
 @onready var round_label: Label = $VBox/RoundLabel
 @onready var countdown: ProgressBar = $VBox/Countdown
 @onready var hands_box: HBoxContainer = $VBox/Hands
+@onready var wait_label: Label = $VBox/WaitLabel
 @onready var result: RichTextLabel = $VBox/Result
 @onready var spectator: Label = $VBox/Spectator
 
@@ -31,8 +32,9 @@ func game_started(_settings: Dictionary, _players: Array) -> void:
 
 func handle_server(op_code: int, payload: Dictionary) -> void:
 	match op_code:
-		OpCodes.ROUND_BEGIN:  _on_round_begin(payload)
-		OpCodes.ROUND_RESULT: _on_round_result(payload)
+		OpCodes.ROUND_BEGIN:    _on_round_begin(payload)
+		OpCodes.ROUND_RESULT:   _on_round_result(payload)
+		OpCodes.THROW_PROGRESS: _on_throw_progress(payload)
 
 
 func game_ended(results: Array) -> void:
@@ -60,9 +62,26 @@ func _on_round_begin(p: Dictionary) -> void:
 	spectator.visible = not i_am_alive
 	hands_box.visible = i_am_alive
 	_set_input_enabled(i_am_alive)
+	wait_label.text = ""
+	# 连续平局加速时,倒计时条泛红提示节奏变了
+	countdown.modulate = Color(1.0, 0.55, 0.45) if streak > 0 else Color.WHITE
+
+
+func _on_throw_progress(p: Dictionary) -> void:
+	var thrown := JsonSafe.arr(p, "thrown")
+	var total := int(p.get("total", 0))
+	var waiting := PackedStringArray()
+	for uid in _alive:
+		if not thrown.has(uid):
+			waiting.append(name_of(str(uid)))
+	if waiting.is_empty():
+		wait_label.text = ""
+	else:
+		wait_label.text = "已出拳 %d/%d · 等:%s" % [thrown.size(), total, "、".join(waiting)]
 
 
 func _on_round_result(p: Dictionary) -> void:
+	wait_label.text = ""
 	_set_input_enabled(false)
 	_time_left = 0.0
 	countdown.value = 0.0

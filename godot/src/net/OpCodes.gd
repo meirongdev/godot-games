@@ -17,8 +17,12 @@ const ERROR        := 13   # S→C {msg}
 const THROW        := 20   # C→S {hand: 0|1|2}
 const ROUND_BEGIN  := 30   # S→C {round, alive[], seconds, deadline_tick}
 const ROUND_RESULT := 31   # S→C {hands{}, winner, draw, advanced[], eliminated[], afk[], draw_streak}
+const THROW_PROGRESS := 32 # S→C {thrown[], total}  谁已出拳(不含手势)
 
 # 手势
 const ROCK    := 0
 const PAPER   := 1
 const SCISSOR := 2
+
+# 游戏 id → 中文名。大厅和房间共用,别各自维护一份。
+const GAME_LABELS := { "rps": "石头剪刀布", "idiom": "成语接龙" }

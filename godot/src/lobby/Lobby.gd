@@ -15,7 +15,6 @@ var _rooms: Array = []
 var _timer := 0.0
 var _busy := false
 
-const GAME_LABELS := { "rps": "石头剪刀布", "idiom": "成语接龙" }
 
 
 func _ready() -> void:
@@ -40,8 +39,13 @@ func _process(delta: float) -> void:
 
 func _on_presence_changed(users: Array) -> void:
 	online_list.clear()
-	for name in users:
-		online_list.add_item(str(name))
+	var me := ServerConnection.get_user_id()
+	users.sort_custom(func(a, b): return a["id"] == me)   # 自己排最前
+	for u in users:
+		var label: String = u["name"]
+		if u["id"] == me:
+			label += "(我)"
+		online_list.add_item(label)
 
 
 func _on_message(_sender_id: String, name: String, text: String) -> void:
@@ -60,7 +64,7 @@ func _load_games() -> void:
 	game_option.clear()
 	for g in await ServerConnection.list_games_async():
 		var id: String = g["id"]
-		game_option.add_item(GAME_LABELS.get(id, id))
+		game_option.add_item(OpCodes.GAME_LABELS.get(id, id))
 		game_option.set_item_metadata(game_option.item_count - 1, id)
 
 
@@ -72,9 +76,14 @@ func _refresh_rooms() -> void:
 	_busy = false
 
 	room_list.clear()
+	if _rooms.is_empty():
+		room_list.add_item("还没有房间 —— 建一个吧")
+		room_list.set_item_disabled(0, true)
+		room_list.set_item_selectable(0, false)
+		return
 	for r in _rooms:
 		var label := "%s · %s  (%d/%d)  房主 %s" % [
-			GAME_LABELS.get(r["game"], r["game"]), r["name"],
+			OpCodes.GAME_LABELS.get(r["game"], r["game"]), r["name"],
 			r["count"], r["max"], r["host_name"]]
 		if r["phase"] != "waiting":
 			label += "  [进行中]"

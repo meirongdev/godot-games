@@ -2,7 +2,7 @@
 local nk    = require("nakama")
 local rules = require("rules.rps_rules")
 
-local OP = { THROW = 20, ROUND_BEGIN = 30, ROUND_RESULT = 31 }
+local OP = { THROW = 20, ROUND_BEGIN = 30, ROUND_RESULT = 31, THROW_PROGRESS = 32 }
 
 local M = {
   id          = "rps",
@@ -112,7 +112,18 @@ function M.on_loop(state, dispatcher, tick, messages)
         if is_alive(g, uid) and g.hands[uid] == nil then
           local ok, d = pcall(nk.json_decode, m.data)
           local h = ok and tonumber(d and d.hand) or nil
-          if h == 0 or h == 1 or h == 2 then g.hands[uid] = h end
+          if h == 0 or h == 1 or h == 2 then
+            g.hands[uid] = h
+            -- 出拳进度:只广播「谁出了」,让大家知道在等谁。
+            -- ☠️ 绝不能把手势放进来 —— 收齐前不泄露任何选择是权威模式的根基。
+            local thrown = {}
+            for _, a in ipairs(g.alive) do
+              if g.hands[a] ~= nil then thrown[#thrown + 1] = a end
+            end
+            dispatcher.broadcast_message(OP.THROW_PROGRESS, nk.json_encode({
+              thrown = thrown, total = #g.alive,
+            }))
+          end
         end
       end
     end

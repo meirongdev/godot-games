@@ -18,6 +18,9 @@ func _on_enter_pressed() -> void:
 	if display_name.is_empty():
 		status.text = "先起个名字"
 		return
+	if display_name.length() > 12:
+		status.text = "名字太长啦(最多 12 个字)"
+		return
 
 	enter_button.disabled = true
 	status.text = "连接中…"
@@ -27,7 +30,11 @@ func _on_enter_pressed() -> void:
 		return
 
 	if await ServerConnection.set_display_name_async(display_name) != OK:
-		_fail("改名失败:%s" % ServerConnection.error_message)
+		# Nakama 的 username 全服唯一。中文名没问题(实测),撞名才会到这里。
+		if "already in use" in ServerConnection.error_message:
+			_fail("「%s」被家里人用了,换一个吧" % display_name)
+		else:
+			_fail("改名失败:%s" % ServerConnection.error_message)
 		return
 
 	if await ServerConnection.connect_to_server_async() != OK:

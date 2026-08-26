@@ -41,6 +41,9 @@ local function sync(dispatcher, state)
     players  = players,
     host     = state.host,
     settings = state.settings,
+    -- 客户端标题栏用:没有这两个字段,房间页只能显示一个写死的「房间」
+    name     = state.name,
+    game     = state.game_id,
   }))
   update_label(dispatcher, state)
 end

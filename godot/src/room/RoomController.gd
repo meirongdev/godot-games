@@ -50,12 +50,20 @@ func _apply_room_state(payload: Dictionary) -> void:
 	_host    = str(payload.get("host", ""))
 	_phase   = str(payload.get("phase", "waiting"))
 
+	# 标题:房名 · 游戏名(服务端 ROOM_STATE 带了 name/game)
+	var game_id := str(payload.get("game", ""))
+	var room_name := str(payload.get("name", "房间"))
+	room_title.text = "%s · %s" % [room_name, OpCodes.GAME_LABELS.get(game_id, game_id)]
+
+	var me := ServerConnection.get_user_id()
 	player_list.clear()
 	for p in _players:
 		var line: String = p["name"]
+		if p["id"] == me:
+			line += "(我)"
 		if p["id"] == _host:
-			line += "  (房主)"
-		line += "  ✓" if p["ready"] else "  …"
+			line += "  👑"
+		line += "  ✓ 已准备" if p["ready"] else "  …"
 		player_list.add_item(line)
 
 	var is_host := ServerConnection.get_user_id() == _host
@@ -91,9 +99,9 @@ func _end_game(payload: Dictionary) -> void:
 	if _game != null:
 		_game.game_ended(results)
 	if results.is_empty():
-		status.text = "本局结束"
+		status.text = "本局结束 · 再来一局请重新准备"
 	else:
-		status.text = "🏆 %s 获胜!" % results[0]["name"]
+		status.text = "🏆 %s 获胜! · 再来一局请重新准备" % results[0]["name"]
 	ready_button.button_pressed = false
 
 

@@ -3,7 +3,7 @@ extends Node
 
 signal socket_connected
 signal socket_closed
-signal lobby_presence_changed(users: Array)
+signal lobby_presence_changed(users: Array)  # [{id, name}],带 id 才能标出「我」
 signal lobby_message(sender_id: String, name: String, text: String)
 signal room_event(op_code: int, payload: Dictionary)
 signal room_joined(match_id: String)
@@ -86,8 +86,15 @@ func join_lobby_async() -> int:
 	_lobby_users.clear()
 	for p in channel.presences:
 		_lobby_users[p.user_id] = p.username
-	lobby_presence_changed.emit(_lobby_users.values())
+	lobby_presence_changed.emit(_lobby_users_list())
 	return OK
+
+
+func _lobby_users_list() -> Array:
+	var out := []
+	for id in _lobby_users:
+		out.append({"id": id, "name": _lobby_users[id]})
+	return out
 
 
 func send_lobby_message_async(text: String) -> void:
@@ -100,7 +107,7 @@ func _on_channel_presence(evt: NakamaRTAPI.ChannelPresenceEvent) -> void:
 		_lobby_users[p.user_id] = p.username
 	for p in evt.leaves:
 		_lobby_users.erase(p.user_id)
-	lobby_presence_changed.emit(_lobby_users.values())
+	lobby_presence_changed.emit(_lobby_users_list())
 
 
 func _on_channel_message(msg: NakamaAPI.ApiChannelMessage) -> void:

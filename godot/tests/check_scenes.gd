@@ -32,7 +32,7 @@ const CHECKS := {
 	"res://src/games/rps/RpsGame.tscn": [
 		"VBox/RoundLabel", "VBox/Countdown", "VBox/Hands",
 		"VBox/Hands/RockButton", "VBox/Hands/PaperButton",
-		"VBox/Hands/ScissorButton", "VBox/Result", "VBox/Spectator",
+		"VBox/Hands/ScissorButton", "VBox/WaitLabel", "VBox/Result", "VBox/Spectator",
 	],
 }
 

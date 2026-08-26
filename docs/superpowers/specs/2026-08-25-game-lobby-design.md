@@ -304,7 +304,7 @@ Nakama 的 `match_loop` 收到的消息只有 `sender / op_code / data`,**没有
 | 1 | C→S | ready | `{ready: bool}` |
 | 2 | C→S | start | `{}`(仅房主) |
 | 3 | C→S | settings | `{...}`(仅房主) |
-| 10 | S→C | room_state | `{phase, players[], settings, host}` |
+| 10 | S→C | room_state | `{phase, players[], settings, host, name, game}` |
 | 11 | S→C | game_started | `{game, settings}` |
 | 12 | S→C | game_over | `{results[]}` |
 | 13 | S→C | error | `{msg}` |
@@ -316,6 +316,7 @@ Nakama 的 `match_loop` 收到的消息只有 `sender / op_code / data`,**没有
 | 20 | C→S | throw | `{hand: 0\|1\|2}` |
 | 30 | S→C | round_begin | `{round, alive[], deadline_tick}` |
 | 31 | S→C | round_result | `{hands{}, advanced[], eliminated[], draw}` |
+| 32 | S→C | throw_progress | `{thrown[], total}` 谁已出拳,不含手势(2026-08-26 加,给「等谁」提示) |
 
 ### 成语接龙
 

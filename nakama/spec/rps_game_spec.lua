@@ -24,6 +24,17 @@ describe("rps 适配层", function()
     assert.equal(3.0, begin.seconds)
   end)
 
+  it("每次出拳广播进度,且绝不泄露手势", function()
+    local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
+    rps.on_start(s, d, 0)
+    rps.on_loop(s, d, 1, { mock.message("a", OP_THROW, { hand = 0 }) })
+    local prog = mock.last(d, 32)
+    assert.same({ "a" }, prog.thrown)
+    assert.equal(3, prog.total)
+    assert.is_nil(prog.hands)                       -- 不带任何手势信息
+    assert.is_nil(mock.last(d, OP_ROUND_RESULT))    -- 也没有提前揭晓
+  end)
+
   it("全员出拳后立即揭晓,不等倒计时", function()
     local d, s = mock.dispatcher(), new_state({ "a", "b" })
     rps.on_start(s, d, 0)

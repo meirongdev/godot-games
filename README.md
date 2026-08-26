@@ -42,6 +42,6 @@ docs/             学习指南 / 设计 spec / 实现计划 / 部署契约
 ## 文档
 
 - [nakama-godot-guide.md](docs/nakama-godot-guide.md) — Godot 4 接入 Nakama 完整指南
-- [testing.md](docs/testing.md) — 本地测试分层与坑
+- [testing.md](docs/testing.md) — 本地测试分层与坑 · [最近一轮报告](docs/test-reports/2026-08-26.md)
 - [deployment-contract.md](docs/deployment-contract.md) — 与部署仓库的契约
 - [superpowers/specs/](docs/superpowers/specs/) · [superpowers/plans/](docs/superpowers/plans/) — 设计与实现记录
