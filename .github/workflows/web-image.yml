@@ -7,7 +7,7 @@
 # 否则集群拉取需要 imagePullSecret。
 #
 # ☠️ 集群的 Kyverno 禁止 :latest。这里推 :latest 只供手工 pull,
-#    k8s/web/deployment.yaml 必须钉 :<short-sha>。
+#    部署侧(homelab)必须钉 :<short-sha>。
 name: godot-games-web image
 
 on:
@@ -16,7 +16,7 @@ on:
     branches: [main]
     paths:
       - godot/**
-      - k8s/web/**
+      - images/web/**
       - tools/build_web.sh
       - .github/workflows/web-image.yml
 
@@ -78,7 +78,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: k8s/web/Dockerfile
+          file: images/web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -89,4 +89,4 @@ jobs:
 
       - name: 部署提示
         run: |
-          echo "::notice::把 k8s/web/deployment.yaml 的 image tag 改成 ${{ steps.sha.outputs.short }}"
+          echo "::notice::homelab 侧把 family-lobby-web 的 image tag 换成 ${{ steps.sha.outputs.short }}"

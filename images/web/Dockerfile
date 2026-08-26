@@ -9,7 +9,7 @@ FROM docker.io/nginxinc/nginx-unprivileged:1.29-alpine
 
 USER root
 
-COPY k8s/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY images/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY build/web/ /usr/share/nginx/html/
 
 # 断言 wasm 的 MIME 存在。缺了的话浏览器只会报一句含糊的 MIME 错误,

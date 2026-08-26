@@ -8,9 +8,17 @@
        强制平局用来验证「连续平局倒计时递减」在真实服务器上生效。
 前置:  cd nakama && docker compose up -d
 """
-import asyncio, json, base64, urllib.request, sys, websockets
+import asyncio, json, base64, urllib.request, sys, os, websockets
 
-HOST, PORT, KEY = "127.0.0.1", 7350, "family-lobby-2026"
+# 默认打本地 compose;设环境变量即可打任何部署,不用改源码:
+#   NAKAMA_HOST=nakama.example.com NAKAMA_PORT=443 NAKAMA_TLS=1 \
+#   NAKAMA_KEY=<server_key> python3 tools/e2e_match.py 3
+HOST = os.environ.get("NAKAMA_HOST", "127.0.0.1")
+PORT = int(os.environ.get("NAKAMA_PORT", "7350"))
+KEY  = os.environ.get("NAKAMA_KEY", "family-lobby-2026")
+_TLS = os.environ.get("NAKAMA_TLS", "") not in ("", "0", "false")
+HTTP_SCHEME = "https" if _TLS else "http"
+WS_SCHEME   = "wss"   if _TLS else "ws"
 HAND = {0: "石头", 1: "布", 2: "剪刀"}
 READY, START, ROOM_STATE, GAME_STARTED, GAME_OVER = 1, 2, 10, 11, 12
 THROW, ROUND_BEGIN, ROUND_RESULT = 20, 30, 31
@@ -23,7 +31,7 @@ def _post(url, body, headers):
 
 def auth(device_id):
     basic = base64.b64encode(f"{KEY}:".encode()).decode()
-    tok = _post(f"http://{HOST}:{PORT}/v2/account/authenticate/device?create=true",
+    tok = _post(f"{HTTP_SCHEME}://{HOST}:{PORT}/v2/account/authenticate/device?create=true",
                 {"id": device_id},
                 {"Content-Type": "application/json",
                  "Authorization": "Basic " + basic})["token"]
@@ -34,7 +42,7 @@ def auth(device_id):
 
 
 def rpc(token, name, payload):
-    out = _post(f"http://{HOST}:{PORT}/v2/rpc/{name}", json.dumps(payload),
+    out = _post(f"{HTTP_SCHEME}://{HOST}:{PORT}/v2/rpc/{name}", json.dumps(payload),
                 {"Content-Type": "application/json",
                  "Authorization": f"Bearer {token}"})
     return json.loads(out["payload"])
@@ -48,7 +56,7 @@ class Client:
     async def connect(self, match_id):
         self.match_id = match_id
         self.ws = await websockets.connect(
-            f"ws://{HOST}:{PORT}/ws?lang=en&status=true&format=json&token={self.token}")
+            f"{WS_SCHEME}://{HOST}:{PORT}/ws?lang=en&status=true&format=json&token={self.token}")
         asyncio.create_task(self._pump())
 
     async def _pump(self):

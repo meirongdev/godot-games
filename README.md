@@ -1,0 +1,44 @@
+# godot-games
+
+家庭游戏大厅:Godot 4 客户端 + 自托管 Nakama 权威服务端。
+首个游戏是 N 人石头剪刀布淘汰赛,成语接龙(M4)在路上。
+
+## 仓库边界
+
+这是**应用仓库**。它构建并发布版本化制品,不拥有任何部署环境的事实
+(namespace、域名、密钥、资源限额都在部署仓库 homelab 里)。
+两个仓库之间的全部交互面 = 两个 OCI 镜像 + 一份契约:
+**[docs/deployment-contract.md](docs/deployment-contract.md)**。
+
+| 制品 | 内容 |
+|---|---|
+| `ghcr.io/meirongdev/godot-games-nakama-modules` | 服务端 Lua 模块(initContainer 拷贝消费) |
+| `ghcr.io/meirongdev/godot-games-web` | Godot Web 导出 + nginx |
+
+## 本地开发
+
+```bash
+cd nakama && docker compose up -d      # Nakama + Postgres
+cd nakama && docker run --rm -v "$PWD:/work" -w /work imega/busted   # 66 项单测
+python3 tools/e2e_match.py 3           # 三个真实账号打满一局
+./tools/build_web.sh && python3 tools/serve_web.py   # http://localhost:8080/?player=a
+```
+
+Godot 编辑器打开 `godot/`,F5 即玩(连本地 compose)。
+
+## 目录
+
+```
+godot/            Godot 4 客户端(ServerConnection 门面 + 场景)
+nakama/modules/   服务端 Lua:rules/ 纯函数(全 TDD) + 适配层
+nakama/spec/      busted 单测(跑在 Lua 5.1 容器里,对齐 GopherLua)
+images/           发布制品的 Dockerfile
+tools/            e2e 测试、构建、截图等工具
+docs/             学习指南 / 设计 spec / 实现计划 / 部署契约
+```
+
+## 文档
+
+- [nakama-godot-guide.md](docs/nakama-godot-guide.md) — Godot 4 接入 Nakama 完整指南
+- [deployment-contract.md](docs/deployment-contract.md) — 与部署仓库的契约
+- [superpowers/specs/](docs/superpowers/specs/) · [superpowers/plans/](docs/superpowers/plans/) — 设计与实现记录
