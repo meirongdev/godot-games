@@ -1,0 +1,92 @@
+# 构建家庭游戏大厅的 Godot Web 版镜像并推到 ghcr。
+#
+# 为什么要在 CI 里跑 Godot 导出:build/web/ 有 38 MB(单个 wasm 就 37.7 MB),
+# 不进仓库。所以 CI 得自己下 Godot + 导出模板再导出,不能只 COPY。
+#
+# 首次构建后,把 ghcr 包 meirongdev/godot-games-web 的可见性设为 Public,
+# 否则集群拉取需要 imagePullSecret。
+#
+# ☠️ 集群的 Kyverno 禁止 :latest。这里推 :latest 只供手工 pull,
+#    k8s/web/deployment.yaml 必须钉 :<short-sha>。
+name: godot-games-web image
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - godot/**
+      - k8s/web/**
+      - tools/build_web.sh
+      - .github/workflows/web-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 从 GitHub Releases 直接取,不依赖第三方 godot-ci 镜像的 tag 是否存在。
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -sL "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" -o godot.zip
+          unzip -q godot.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Install export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -sL "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -o tpl.tpz
+          unzip -q tpl.tpz
+          mkdir -p "$HOME/.local/share/godot/export_templates"
+          mv templates "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+
+      - name: Export web build
+        run: |
+          set -euo pipefail
+          mkdir -p build/web
+          # 首次运行要先导入资源,否则导出会缺资源。--import 跑完再导出。
+          godot --headless --path godot --import || true
+          godot --headless --path godot --export-release "Web" ../build/web/index.html
+          ls -lh build/web
+          test -s build/web/index.wasm
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/meirongdev/godot-games-web:latest
+            ghcr.io/meirongdev/godot-games-web:${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 部署提示
+        run: |
+          echo "::notice::把 k8s/web/deployment.yaml 的 image tag 改成 ${{ steps.sha.outputs.short }}"
