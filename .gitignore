@@ -2,7 +2,8 @@
 godot/.godot/
 godot/.import/
 godot/export.cfg
-godot/export_presets.cfg
+# export_presets.cfg 刻意提交:CI 导出 Web 版必须要它,且当前只有 Web 预设、
+# 不含任何签名凭据。将来若加安卓预设,keystore 凭据走 CI 环境变量,别写进这个文件。
 godot/android/
 
 # 本机连接配置(含 homelab 地址与 server_key)
