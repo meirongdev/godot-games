@@ -23,6 +23,8 @@
 | **Godot** | ❌ **未装,Task 0 装** |
 | **本机 Lua / busted** | ❌ 未装,**不装** —— 走 Docker |
 
+Godot 的解析检查**必须带 `--editor`**,否则在主场景就位前它是个空操作(见 Task 9 Step 8)。
+
 Lua 测试跑在 `imega/busted` 容器里,实测 `_VERSION = Lua 5.1`,与 Nakama 的 GopherLua 语义一致。镜像是 amd64,在 Apple Silicon 上走模拟,会打印一行 platform warning —— **属正常,不是错误**,加 `--platform linux/amd64` 可让它闭嘴。实测单次跑 ~1.6ms。
 
 ---
@@ -210,6 +212,7 @@ services:
         --database.address postgres:localdb@postgres:5432/nakama
         --socket.server_key "family-lobby-2026"
         --session.token_expiry_sec 7200
+        --runtime.lua_min_count 1
         --runtime.lua_max_count 4
         --logger.level DEBUG
     volumes:
@@ -228,6 +231,10 @@ volumes:
 ```
 
 `--runtime.lua_max_count 4` 是 spec §11 的要求:默认最多 48 个 Lua VM,M4 加载 1.12MB 词库后会吃掉 ~430MB。家用 4 个够。
+
+> ⚠️ **`--runtime.lua_min_count 1` 必须一起给。** Nakama 的 `lua_min_count` 默认是 16,而它会校验 `min <= max`,只调 max 会让容器直接启动失败退出:
+> `Minimum Lua runtime instance count must be less than or equal to maximum`
+> 这是实施时踩出来的,别删这行。
 
 - [ ] **Step 4: 写 busted 配置**
 
@@ -922,6 +929,19 @@ describe("rps 适配层", function()
     assert.equal(1, r.draw_streak)
   end)
 
+  it("ROUND_BEGIN 带上 draw_streak,客户端才能显示加速提示", function()
+    local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
+    rps.on_start(s, d, 0)
+    assert.equal(0, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+    rps.on_loop(s, d, 1, {                      -- 制造一次平局
+      mock.message("a", OP_THROW, { hand = 0 }),
+      mock.message("b", OP_THROW, { hand = 1 }),
+      mock.message("c", OP_THROW, { hand = 2 }),
+    })
+    rps.on_loop(s, d, 1000, {})                 -- 开下一轮
+    assert.equal(1, mock.last(d, OP_ROUND_BEGIN).draw_streak)
+  end)
+
   it("连续平局时下一轮倒计时缩短", function()
     local d, s = mock.dispatcher(), new_state({ "a", "b", "c" })
     rps.on_start(s, d, 0)
@@ -1046,6 +1066,9 @@ local function begin_round(state, dispatcher, tick)
   dispatcher.broadcast_message(OP.ROUND_BEGIN, nk.json_encode({
     round = g.round, alive = g.alive,
     seconds = secs, deadline_tick = g.deadline,
+    -- 客户端要在回合开始时就显示「连续平局 ×N,加速」,
+    -- 所以 draw_streak 必须跟着 ROUND_BEGIN 走,不能只在 ROUND_RESULT 里发。
+    draw_streak = g.draw_streak,
   }))
 end
 
@@ -1867,8 +1890,11 @@ curl -s -X POST "http://127.0.0.1:7350/v2/rpc/list_rooms" \
 ```
 
 Expected:
-第一条返回 `{"match_id":"<uuid>.nakama1","name":"客厅"}`
+第一条返回 `{"match_id":"<uuid>.nakama","name":"客厅"}`(后缀是节点名;compose 没设 `--name`,所以是 `nakama`)
 第二条返回含该房间的 `{"rooms":[{"match_id":"...","game":"rps","name":"客厅","count":0,...}]}`
+
+> ⚠️ **`match_create` 到 `match_list` 可见有约 0.9–1.5 秒索引延迟**(实测,Nakama match registry 的固有行为,不是代码问题)。紧接着 `create_room` 查 `list_rooms` 很可能看不到自己刚建的房。等 1.5 秒再查,或重试几次。
+> 另外**空列表会返回 `{"rooms":{}}` 而不是 `{"rooms":[]}`** —— Lua 空表编码歧义,客户端必须归一化。
 
 **这一步通过 = 整个服务端跑通了。**
 
@@ -1889,6 +1915,7 @@ git commit -m "feat(lobby): create_room / list_rooms / list_games RPCs"
 - Create: `godot/nakama.cfg.example`, `godot/nakama.cfg`
 - Create: `godot/src/autoload/NakamaConfig.gd`
 - Create: `godot/src/net/OpCodes.gd`
+- Create: `godot/src/net/JsonSafe.gd`
 - Create: `godot/src/autoload/ServerConnection.gd`
 
 > Godot 端没有单测(装 GUT 属于本计划范围外)。验证方式是 `--headless --quit` 做解析检查 + 手工观察。每个任务都给了确切的预期现象。
@@ -1945,6 +1972,8 @@ var host := "127.0.0.1"
 var port := 7350
 var scheme := "http"
 var server_key := "family-lobby-2026"
+## 同机联调用:附加到设备 ID 后面,让多个实例登进不同账号
+var device_suffix := ""
 
 static func load_or_default() -> NakamaConfig:
 	var cfg := NakamaConfig.new()
@@ -1960,6 +1989,10 @@ static func load_or_default() -> NakamaConfig:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--nakama-host="):
 			cfg.host = arg.split("=", true, 1)[1]
+		# 设备认证按机器 ID,同机多实例会撞成同一个账号。
+		#   godot --path godot -- --device-suffix=2
+		elif arg.begins_with("--device-suffix="):
+			cfg.device_suffix = arg.split("=", true, 1)[1]
 	return cfg
 ```
 
@@ -1994,6 +2027,41 @@ const PAPER   := 1
 const SCISSOR := 2
 ```
 
+- [ ] **Step 5b: 写 JSON 防御助手**
+
+服务端是 Lua,而 Lua 分不清「空表」和「空数组」—— `nk.json_encode({})` 产出 `{}` 不是 `[]`。
+客户端把它赋给静态 `Array` 类型的变量会直接抛运行时错误。这个坑在本项目里踩过三次
+(`list_rooms` / `list_games` / `ROUND_RESULT.afk`),所以统一收敛到一个助手里。
+
+Create `godot/src/net/JsonSafe.gd`:
+
+```gdscript
+class_name JsonSafe
+extends RefCounted
+## 服务端 JSON 的防御性读取。
+##
+## Lua 分不清「空表」和「空数组」,`nk.json_encode({})` 产出的是 `{}` 而不是 `[]`。
+## 于是服务端一个本该是数组的空字段,到客户端会解析成 Dictionary;直接赋给
+## 静态 Array 类型的变量会抛:
+##     Trying to assign value of type 'Dictionary' to a variable of type 'Array'
+## 这个坑在本项目里已经踩过三次(list_rooms / list_games / ROUND_RESULT.afk),
+## 所以统一收敛到这里。凡是从服务端读数组,一律走 arr()。
+
+
+## 取出一个必定是 Array 的值。缺失、类型不对、或是 Lua 的空表 `{}`,都返回 []。
+static func arr(source: Dictionary, key: String) -> Array:
+	var value = source.get(key, [])
+	return value if value is Array else []
+
+
+## 同上,但用于取字典字段(Lua 空表在这里反而是对的)。
+static func dict(source: Dictionary, key: String) -> Dictionary:
+	var value = source.get(key, {})
+	return value if value is Dictionary else {}
+```
+
+**规矩:凡是从服务端 payload 里读数组,一律走 `JsonSafe.arr()`,不要直接 `payload.get(k, [])`。**
+
 - [ ] **Step 6: 写 ServerConnection**
 
 Create `godot/src/autoload/ServerConnection.gd`:
@@ -2020,10 +2088,12 @@ var _socket: NakamaSocket
 var _lobby_channel := ""
 var _match_id := ""
 var _lobby_users := {}   # user_id -> username
+var _config: NakamaConfig
 
 
 func _ready() -> void:
-	var cfg := NakamaConfig.load_or_default()
+	_config = NakamaConfig.load_or_default()
+	var cfg := _config
 	_client = Nakama.create_client(cfg.server_key, cfg.host, cfg.port, cfg.scheme)
 	_client.timeout = 10
 	_client.auto_refresh = true
@@ -2033,7 +2103,10 @@ func _ready() -> void:
 
 ## 设备认证。家庭局不需要注册流程,一键进。
 func login_async() -> int:
-	var session = await _client.authenticate_device_async(Nakama.get_device_id())
+	var device_id := Nakama.get_device_id()
+	if not _config.device_suffix.is_empty():
+		device_id += "-" + _config.device_suffix
+	var session = await _client.authenticate_device_async(device_id)
 	var err := _check(session)
 	if err == OK:
 		_session = session
@@ -2117,7 +2190,9 @@ func list_rooms_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("rooms", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	return JsonSafe.arr(payload, "rooms")
 
 
 func list_games_async() -> Array:
@@ -2125,7 +2200,9 @@ func list_games_async() -> Array:
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
-	return payload.get("games", []) if payload is Dictionary else []
+	if not (payload is Dictionary):
+		return []
+	return JsonSafe.arr(payload, "games")
 
 
 ## 建房并直接进去。返回 match_id,失败返回空串。
@@ -2205,9 +2282,17 @@ func _check(result) -> int:
 
 - [ ] **Step 8: 解析检查**
 
+> ⚠️ **`--editor` 不能省。** 不加它的话,Godot 在加载任何脚本**之前**就因为「没有主场景」退出了 —— 正确代码和语法错误代码的输出**逐字节相同**,这条检查等于没做。已用故障注入验证:
+> ```
+> 无 --editor,正确代码:  Error: Can't run project: no main scene defined
+> 无 --editor,注入语法错误:Error: Can't run project: no main scene defined   ← 一样
+> 加 --editor,注入语法错误:SCRIPT ERROR: Parse Error: Expected parameter name.
+> ```
+> Task 10 设了 `run/main_scene` 之后不加也能用,但 `--editor` 一直是更彻底的检查(它会完整扫描项目、注册全局类、编译所有 autoload)。
+
 ```bash
 cd /Users/matthew/projects/meirongdev/godot-games
-godot --headless --path godot --quit 2>&1 | grep -iE "error|SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`
@@ -2456,15 +2541,15 @@ func _on_create_pressed() -> void:
 - [ ] **Step 6: 解析检查 + 手工验证**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
-然后在 Godot 里 Debug → Run Multiple Instances → 2,F5,两个窗口各输一个名字进大厅。
+然后开两个实例(要加 `--device-suffix`,见 Task 13),各输一个名字进大厅。
 
 Expected:
 1. 两边的「在线」列表都显示两个名字
 2. 一边发聊天,另一边立刻看到
-3. 一边建房,**3 秒内**另一边的房间列表出现该房间
+3. 一边建房,**约 5 秒内**另一边的房间列表出现该房间(3 秒轮询间隔 + 最多 1.5 秒服务端索引延迟)
 4. 建房的那边会因为 `Room.tscn` 不存在而报错 —— 下个任务建
 
 - [ ] **Step 7: 提交**
@@ -2605,7 +2690,7 @@ func _on_room_event(op_code: int, payload: Dictionary) -> void:
 
 
 func _apply_room_state(payload: Dictionary) -> void:
-	_players = payload.get("players", [])
+	_players = JsonSafe.arr(payload, "players")
 	_host    = str(payload.get("host", ""))
 	_phase   = str(payload.get("phase", "waiting"))
 
@@ -2646,7 +2731,7 @@ func _start_game(payload: Dictionary) -> void:
 
 
 func _end_game(payload: Dictionary) -> void:
-	var results: Array = payload.get("results", [])
+	var results := JsonSafe.arr(payload, "results")
 	if _game != null:
 		_game.game_ended(results)
 	if results.is_empty():
@@ -2684,14 +2769,14 @@ func _error_text(code: String) -> String:
 - [ ] **Step 4: 解析检查**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`(`RpsGame.tscn` 还不存在,但 `load()` 是运行时才解析,不影响)
 
 - [ ] **Step 5: 手工验证房间流程**
 
-Run Multiple Instances → 2,两边进大厅,一边建房、另一边双击加入。
+开两个实例(同样要加 `--device-suffix`,见 Task 13),两边进大厅,一边建房、另一边双击加入。
 
 Expected:
 1. 两边都进 Room 场景,玩家列表显示两个人
@@ -2743,7 +2828,7 @@ Create `godot/src/games/rps/RpsGame.gd`:
 extends GameBase
 ## 石头剪刀布客户端。只负责显示和发送出拳,胜负一律由服务端裁定。
 
-const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌" }
+const HAND_ICON := { 0: "✊", 1: "✋", 2: "✌️" }
 const HAND_NAME := { 0: "石头", 1: "布", 2: "剪刀" }
 
 @onready var round_label: Label = $VBox/RoundLabel
@@ -2788,7 +2873,7 @@ func game_ended(results: Array) -> void:
 # ---------------------------------------------------------------- 回合
 
 func _on_round_begin(p: Dictionary) -> void:
-	_alive = p.get("alive", [])
+	_alive = JsonSafe.arr(p, "alive")
 	_thrown = false
 	_round_seconds = float(p.get("seconds", 3.0))
 	_time_left = _round_seconds
@@ -2809,7 +2894,7 @@ func _on_round_result(p: Dictionary) -> void:
 	_time_left = 0.0
 	countdown.value = 0.0
 
-	var hands: Dictionary = p.get("hands", {})
+	var hands := JsonSafe.dict(p, "hands")
 	var line := ""
 	for uid in hands.keys():
 		line += "%s %s   " % [name_of(str(uid)), HAND_ICON.get(int(hands[uid]), "?")]
@@ -2822,14 +2907,14 @@ func _on_round_result(p: Dictionary) -> void:
 	var winner := int(p.get("winner", 0))
 	result.append_text("[b]%s %s 胜[/b]\n" % [HAND_ICON[winner], HAND_NAME[winner]])
 
-	var eliminated: Array = p.get("eliminated", [])
+	var eliminated := JsonSafe.arr(p, "eliminated")
 	if not eliminated.is_empty():
 		var names := PackedStringArray()
 		for uid in eliminated:
 			names.append(name_of(str(uid)))
 		result.append_text("[color=red]淘汰:%s[/color]\n" % ", ".join(names))
 
-	var afk: Array = p.get("afk", [])
+	var afk := JsonSafe.arr(p, "afk")
 	if not afk.is_empty():
 		var names := PackedStringArray()
 		for uid in afk:
@@ -2866,14 +2951,14 @@ func _process(delta: float) -> void:
 - [ ] **Step 3: 解析检查**
 
 ```bash
-godot --headless --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR" || echo "无脚本错误"
+godot --headless --editor --path godot --quit 2>&1 | grep -iE "SCRIPT ERROR|Parse Error" || echo "无脚本错误"
 ```
 
 Expected: `无脚本错误`
 
 - [ ] **Step 4: 两人对局验证**
 
-Run Multiple Instances → 2,两边进同一个房间,都准备,房主开始。
+开两个实例(同样要加 `--device-suffix`,见 Task 13),进同一房间,都准备,房主开始。
 
 Expected:
 1. 两边同时看到「第 1 轮 · 剩 2 人」和倒计时条
@@ -2914,7 +2999,16 @@ Expected: `服务端无错误`
 
 - [ ] **Step 3: 三人局验证平局加速**
 
-Run Multiple Instances → **3**,三人进同一房间开局。
+开三个实例。**不能直接用 `Run Multiple Instances`** —— 设备认证按机器 ID,三个窗口会登进同一个账号,服务端当成同一个人重连,多人测不了。用命令行加设备后缀:
+
+```bash
+cd /Users/matthew/projects/meirongdev/godot-games
+godot --path godot -- --device-suffix=a &
+godot --path godot -- --device-suffix=b &
+godot --path godot -- --device-suffix=c &
+```
+
+三人进同一房间开局。
 
 三人局的平局率是 33%,多打几轮一定能撞上连续平局。
 
@@ -2948,8 +3042,8 @@ Expected:
 一边在房间里玩,另一边留在大厅。
 
 Expected:
-1. 大厅那边的房间列表 3 秒内把该房间标成 `[进行中]` 且置灰不可点
-2. 局终回到 waiting 后,3 秒内恢复成可加入
+1. 大厅那边的房间列表约 5 秒内把该房间标成 `[进行中]` 且置灰不可点
+2. 局终回到 waiting 后,约 5 秒内恢复成可加入
 
 - [ ] **Step 7: 合并**
 
@@ -2972,6 +3066,27 @@ git merge --no-ff feat/lobby-and-rps -m "feat: game lobby with rock-paper-scisso
 - [ ] 连续平局时倒计时可见地缩短
 - [ ] 中途关窗口不影响其他人
 - [ ] 房间列表在大厅侧 3 秒内反映房间状态
+
+## 布局教训(M4 做成语接龙时照这个来)
+
+第一版所有 `.tscn` 只写了节点树,没写任何尺寸属性。结果是所有控件都取 Godot 的默认最小尺寸——
+表单只有 90px 宽,几个小方块飘在大片空白里,完全没法用。而这一点**解析检查和节点路径检查都发现不了**,
+因为语法和结构都是对的。
+
+必须显式设定的东西:
+
+| 项目 | 做法 |
+|---|---|
+| 全局字号 | `godot/src/ui/family.tres` 一个 Theme 管所有,别逐节点覆盖 |
+| 窗口缩放 | `project.godot` 的 `stretch/mode="canvas_items"` + `aspect="expand"`,不设的话窗口放大只是留白变多 |
+| 页面留白 | 根容器用 anchor `offset_*` 内缩(**不要插 MarginContainer** —— `.gd` 里的 `$Path` 是硬编码的,加节点会全断) |
+| 触摸目标 | 按钮/输入框 `custom_minimum_size` 至少 48–56px 高,手机上才点得中 |
+| 该扩展的区域 | `size_flags_vertical = 3`,否则 ItemList / RichTextLabel 会被压成 0 高 |
+| RichTextLabel | 默认**没有背景**,不给 `theme_override_styles/normal` 就是隐形的 |
+| emoji | `✌` (U+270C) 默认是文字呈现会渲染成线框,要加变体选择符 `✌️` (U+FE0F) |
+
+验证手段:`Godot --path godot --write-movie /tmp/shot.png --quit-after 10` 能直接出截图,
+配合临时改 `run/main_scene` 可以拍任意场景。这是唯一能发现视觉问题的办法。
 
 ## 本计划刻意不做(与 spec 的已知偏差)
 

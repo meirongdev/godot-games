@@ -1,7 +1,7 @@
 # 家庭游戏大厅 — 设计文档
 
 日期:2026-08-25
-状态:待评审
+状态:M1–M3 已实施并发布(2026-08-26);M4 成语接龙、M5 打磨待做
 相关:[nakama-godot-guide.md](../../nakama-godot-guide.md)
 
 ---
@@ -304,7 +304,7 @@ Nakama 的 `match_loop` 收到的消息只有 `sender / op_code / data`,**没有
 | 1 | C→S | ready | `{ready: bool}` |
 | 2 | C→S | start | `{}`(仅房主) |
 | 3 | C→S | settings | `{...}`(仅房主) |
-| 10 | S→C | room_state | `{phase, players[], settings, host}` |
+| 10 | S→C | room_state | `{phase, players[], settings, host, name, game}` |
 | 11 | S→C | game_started | `{game, settings}` |
 | 12 | S→C | game_over | `{results[]}` |
 | 13 | S→C | error | `{msg}` |
@@ -316,6 +316,7 @@ Nakama 的 `match_loop` 收到的消息只有 `sender / op_code / data`,**没有
 | 20 | C→S | throw | `{hand: 0\|1\|2}` |
 | 30 | S→C | round_begin | `{round, alive[], deadline_tick}` |
 | 31 | S→C | round_result | `{hands{}, advanced[], eliminated[], draw}` |
+| 32 | S→C | throw_progress | `{thrown[], total}` 谁已出拳,不含手势(2026-08-26 加,给「等谁」提示) |
 
 ### 成语接龙
 
@@ -387,10 +388,12 @@ Nakama 的 Lua VM 是池化的(默认最多 48 个),每个 VM 都会加载全部
 
 ```
 48 VM × ~9 MB ≈ 430 MB   ← 默认配置,家用服务器吃不消
- 4 VM × ~9 MB ≈  36 MB   ← 加 --runtime.lua_max_count 4
+ 4 VM × ~9 MB ≈  36 MB   ← 加 --runtime.lua_min_count 1 --runtime.lua_max_count 4
 ```
 
 家庭规模用 4 个 VM 绰绰有余。写进部署文档。
+
+⚠️ **两个参数必须成对给。** `lua_min_count` 默认 16,Nakama 会校验 `min <= max`,只设 max 会让服务启动失败。
 
 ## 12. 里程碑
 

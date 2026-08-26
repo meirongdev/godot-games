@@ -1,0 +1,61 @@
+# 构建 Nakama Lua 模块镜像并推到 ghcr。
+# 这是本仓库与部署仓库(homelab)之间的两个契约制品之一,
+# 另一个是 godot-games-web。消费方式见 docs/deployment-contract.md。
+#
+# 首次构建后把 ghcr 包 meirongdev/godot-games-nakama-modules 设为 Public,
+# 否则集群拉取需要 imagePullSecret。
+name: nakama-modules image
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - nakama/modules/**
+      - images/nakama-modules/**
+      - .github/workflows/nakama-modules-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 推镜像之前先跑单测 —— 模块是逻辑,不是静态资源。
+      - name: Run busted tests
+        run: |
+          cd nakama
+          docker run --rm -v "$PWD:/work" -w /work imega/busted
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/nakama-modules/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/meirongdev/godot-games-nakama-modules:latest
+            ghcr.io/meirongdev/godot-games-nakama-modules:${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 部署提示
+        run: |
+          echo "::notice::homelab 侧把 nakama 的 copy-game-modules initContainer tag 换成 ${{ steps.sha.outputs.short }}"

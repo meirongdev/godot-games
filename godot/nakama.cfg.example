@@ -1,0 +1,5 @@
+[nakama]
+host="127.0.0.1"
+port=7350
+scheme="http"
+server_key="family-lobby-2026"

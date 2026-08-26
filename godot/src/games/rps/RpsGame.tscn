@@ -1,0 +1,92 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/games/rps/RpsGame.gd" id="1_rps"]
+
+[sub_resource type="StyleBoxFlat" id="panel"]
+bg_color = Color(0.16, 0.16, 0.16, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[node name="RpsGame" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_rps")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/separation = 14
+
+[node name="RoundLabel" type="Label" parent="VBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "准备中…"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Countdown" type="ProgressBar" parent="VBox"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+value = 1.0
+show_percentage = false
+
+[node name="Hands" type="HBoxContainer" parent="VBox"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="RockButton" type="Button" parent="VBox/Hands"]
+custom_minimum_size = Vector2(140, 140)
+layout_mode = 2
+theme_override_font_sizes/font_size = 64
+text = "✊"
+
+[node name="PaperButton" type="Button" parent="VBox/Hands"]
+custom_minimum_size = Vector2(140, 140)
+layout_mode = 2
+theme_override_font_sizes/font_size = 64
+text = "✋"
+
+[node name="ScissorButton" type="Button" parent="VBox/Hands"]
+custom_minimum_size = Vector2(140, 140)
+layout_mode = 2
+theme_override_font_sizes/font_size = 64
+text = "✌️"
+
+[node name="WaitLabel" type="Label" parent="VBox"]
+modulate = Color(1, 1, 1, 0.7)
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="Result" type="RichTextLabel" parent="VBox"]
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/normal_font_size = 22
+theme_override_styles/normal = SubResource("panel")
+bbcode_enabled = true
+scroll_following = true
+
+[node name="Spectator" type="Label" parent="VBox"]
+modulate = Color(1, 1, 1, 0.6)
+visible = false
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "你已出局,观战中"
+horizontal_alignment = 1

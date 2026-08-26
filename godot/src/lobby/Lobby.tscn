@@ -1,0 +1,101 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/lobby/Lobby.gd" id="1_lobby"]
+
+[sub_resource type="StyleBoxFlat" id="panel"]
+bg_color = Color(0.16, 0.16, 0.16, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[node name="Lobby" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_lobby")
+
+[node name="HBox" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+theme_override_constants/separation = 20
+
+[node name="Left" type="VBoxContainer" parent="HBox"]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OnlineTitle" type="Label" parent="HBox/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "在线"
+
+[node name="OnlineList" type="ItemList" parent="HBox/Left"]
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.6
+
+[node name="ChatLog" type="RichTextLabel" parent="HBox/Left"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/normal = SubResource("panel")
+bbcode_enabled = true
+scroll_following = true
+
+[node name="ChatEdit" type="LineEdit" parent="HBox/Left"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+placeholder_text = "说点什么…"
+
+[node name="Right" type="VBoxContainer" parent="HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="RoomTitle" type="Label" parent="HBox/Right"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "房间"
+
+[node name="RoomList" type="ItemList" parent="HBox/Right"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 20
+
+[node name="RefreshButton" type="Button" parent="HBox/Right"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "  刷新  "
+
+[node name="CreateBox" type="HBoxContainer" parent="HBox/Right"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="GameOption" type="OptionButton" parent="HBox/Right/CreateBox"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+
+[node name="RoomNameEdit" type="LineEdit" parent="HBox/Right/CreateBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "房间名(留空自动起)"
+
+[node name="CreateButton" type="Button" parent="HBox/Right/CreateBox"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "建房"
