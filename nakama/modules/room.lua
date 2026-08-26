@@ -66,6 +66,7 @@ function M.match_init(_, params)
     ready     = {},   -- uid -> bool
     settings  = settings,
     g         = nil,  -- 游戏私有状态,由游戏模块拥有
+    empty_ticks = 0,  -- 房间空置计时,见 match_loop 里的自动关闭
   }
   return state, game.tickrate, room_rules.encode_label(label_info(state))
 end
@@ -161,6 +162,17 @@ end
 
 function M.match_loop(_, dispatcher, tick, state, messages)
   local game = games.get(state.game_id)
+
+  -- 空房自动关闭:match handler 不返回 nil 的话,每个被建出来又被离开的
+  -- 房间都会以 tickrate 永远空转 —— 服务器上的僵尸。空置 60 秒即结束。
+  if next(state.presences) == nil then
+    state.empty_ticks = state.empty_ticks + 1
+    if state.empty_ticks > game.tickrate * 60 then
+      return nil
+    end
+  else
+    state.empty_ticks = 0
+  end
 
   if state.phase == "waiting" then
     for _, m in ipairs(messages) do

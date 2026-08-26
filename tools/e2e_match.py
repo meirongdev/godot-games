@@ -127,7 +127,9 @@ async def run(n, force_draws=0):
 
     print("\n=== 5. 对局 ===")
     winner, guard, countdowns = None, 0, []
-    while winner is None and guard < 40:
+    # 护栏:每收一条消息计一次。op 32(出拳进度)让每轮消息数 ≈ 2 + 人数,
+    # 别把这个阈值再调回 40 —— 5 人强制平局局会在局终前先撞上它。
+    while winner is None and guard < 300:
         guard += 1
         code, p = await clients[0].next()
 

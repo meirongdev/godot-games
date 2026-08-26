@@ -185,6 +185,37 @@ describe("room 结算", function()
   end)
 end)
 
+describe("room 空置自动关闭", function()
+  it("空置超过 60 秒后 match_loop 返回 nil 结束 match", function()
+    local s, d = fresh("a"), mock.dispatcher()
+    -- 没人进来,空转 601 个 tick(tickrate 10 × 60s = 600)
+    for _ = 1, 600 do
+      s = room.match_loop(nil, d, 0, s, {})
+      assert.is_not_nil(s)
+    end
+    assert.is_nil(room.match_loop(nil, d, 0, s, {}))
+  end)
+
+  it("有人在房间时不计空置", function()
+    local s, d = fresh("a"), mock.dispatcher()
+    s = join(s, d, { "a" })
+    for _ = 1, 700 do
+      s = room.match_loop(nil, d, 0, s, {})
+    end
+    assert.is_not_nil(s)
+  end)
+
+  it("人走光后重新计时,再来人则清零", function()
+    local s, d = fresh("a"), mock.dispatcher()
+    s = join(s, d, { "a" })
+    s = room.match_leave(nil, d, 0, s, { mock.presence("a") })
+    for _ = 1, 500 do s = room.match_loop(nil, d, 0, s, {}) end
+    s = join(s, d, { "b" })                    -- 又有人来
+    for _ = 1, 500 do s = room.match_loop(nil, d, 0, s, {}) end
+    assert.is_not_nil(s)                        -- 没被关掉
+  end)
+end)
+
 describe("room 必需回调齐全", function()
   it("Nakama 要求的 7 个回调一个不少", function()
     for _, name in ipairs({ "match_init", "match_join_attempt", "match_join",

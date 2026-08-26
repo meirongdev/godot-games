@@ -18,7 +18,7 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 
 | 层 | 命令 | 耗时 | 抓什么 |
 |---|---|---|---|
-| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(66 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
+| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(70 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
 | 2 GDScript 解析 | `godot --headless --editor --path godot --quit 2>&1 \| grep -icE "SCRIPT ERROR\|Parse Error"`(应为 0) | ~5s | 语法/类型错误 |
 | 3 场景节点路径 | `godot --headless --path godot --script res://tests/check_scenes.gd` | ~3s | `.tscn` 节点名与 `.gd` 里 `$Path` 的错位(运行时才炸的那种) |
 | 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~15s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态 |
@@ -50,6 +50,9 @@ Godot 的 Movie Maker 模式能无窗口渲染帧:
 ```bash
 godot --path godot --write-movie /tmp/shots/f.png --quit-after 10
 ```
+
+文档用的「有内容」截图(对局中、满员大厅)由 `python3 tools/take_screenshots.py`
+生成 —— 它用 `godot/tests/ShotHarness.gd` 给场景喂真实格式的服务端 payload。
 
 产出 `/tmp/shots/f00000009.png`(取最后一帧)。默认拍主场景(Login);拍别的场景,
 临时把 `godot/project.godot` 的 `run/main_scene` 指过去,拍完改回来。
