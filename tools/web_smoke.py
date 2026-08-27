@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -38,11 +39,19 @@ import websockets
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 9333
 
-# 每次都要换名字:Chrome profile 是临时目录,IndexedDB 每跑一次都是空的,
-# 于是 Nakama 的设备 ID 每次重新生成 → 每次都是新账号。而 Nakama 的 username
-# 全局唯一,固定名字第二次跑就会撞上「Username is already in use」。
-# Login.gd 限名字最长 12 个字,所以只取时间戳后 6 位。
-NAME = "smoke" + str(int(time.time()))[-6:]
+# 名字每次都要换,而且两个档位之间也要不一样(理由见上)。
+# Login.gd 限名字最长 12 个字,所以 5 位时间戳 + 1 位档位标记。
+NAME_BASE = "smoke" + str(int(time.time()))[-5:]
+
+# 两个档位都要过。手机档位是这次的重点,桌面档位防回归。
+TIERS = [
+    {"name": "桌面", "win": None, "tag": "d"},
+    {"name": "手机竖屏", "win": (390, 844), "tag": "m"},
+]
+
+# 逻辑视口宽度的上限(手机档位)。基准分辨率不对时这里会是 1280,
+# 内容被缩到 30%,按钮实际高约 18pt —— iOS 的最小点击目标是 44pt。
+MOBILE_VIEWPORT_MAX = 480
 
 CHROME_CANDIDATES = [
     os.environ.get("CHROME", ""),
@@ -51,6 +60,23 @@ CHROME_CANDIDATES = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
 ]
+
+
+def assert_port_free():
+    """调试端口必须是干净的,否则会连错浏览器。
+
+    ⚠️ 这不是洁癖。PORT 是固定的,而 run() 靠 `/json/list` 找页面 target ——
+    端口上要是还挂着上一次没退干净的 Chrome(比如被 kill 掉的自动化任务留下的),
+    我们会**连上那个旧浏览器**并驱动它。它身上可能还留着上次的
+    setDeviceMetricsOverride,于是「桌面档位」跑出手机视口,断言以
+    「没能进大厅」的形式失败 —— 症状和真实的代码回归一模一样,
+    2026-08-27 为此白查了一轮。宁可一开始就报错。
+    """
+    with socket.socket() as sock:
+        if sock.connect_ex(("127.0.0.1", PORT)) == 0:
+            sys.exit(
+                f"✗ 调试端口 {PORT} 已被占用 —— 很可能是上次没退干净的 Chrome。\n"
+                f"  先清掉再跑:lsof -ti tcp:{PORT} | xargs -r kill -9")
 
 
 def find_chrome():
@@ -90,6 +116,8 @@ class Page:
 
     _shots = {}
 
+    # 登录流程已经不用坐标了,但点按钮这个原语留着 —— 大厅/房间的交互
+    # (建房、准备、开局)只能靠点,扩冒烟测试的人需要它。
     async def click(self, x, y):
         for t, buttons in (("mousePressed", 1), ("mouseReleased", 0)):
             await self.send("Input.dispatchMouseEvent", {
@@ -108,12 +136,20 @@ class Page:
                 await self.send("Input.dispatchKeyEvent", dict(base, type=t))
                 await asyncio.sleep(0.02)
 
+    async def press_enter(self):
+        base = {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13,
+                "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"}
+        for t in ("keyDown", "char", "keyUp"):
+            await self.send("Input.dispatchKeyEvent", dict(base, type=t))
+            await asyncio.sleep(0.03)
+
     async def shot(self, path):
         mid = await self.send("Page.captureScreenshot", {"format": "png"})
         self._shots[mid] = path
 
 
-async def run(url, shot_path):
+async def run(url, shot_path, name, win=None):
+    assert_port_free()
     profile = tempfile.mkdtemp(prefix="web-smoke-")
     chrome = subprocess.Popen([
         find_chrome(), "--headless=new", f"--remote-debugging-port={PORT}",
@@ -144,13 +180,34 @@ async def run(url, shot_path):
             await page.send("Page.enable")
             pump = asyncio.create_task(page.pump())
 
-            await page.send("Page.navigate", {"url": f"{url}/?player={NAME}"})
+            if win:
+                await page.send("Emulation.setDeviceMetricsOverride", {
+                    "width": win[0], "height": win[1],
+                    "deviceScaleFactor": 3, "mobile": True})
+                # 特意不开 Emulation.setTouchEmulationEnabled。实测(A/B/C/D/E 五组
+                # 对照)一开它,name 就打不进去、Enter 也没反应,登录卡死在 [layout]
+                # 之后 —— 跟视口尺寸无关(单独开它、不带 metrics override 照样卡)。
+                #
+                # 机制不是「Chrome 吞事件」,是**焦点换了地方**:
+                # export_presets.cfg 里 html/experimental_virtual_keyboard=true,
+                # 而 Godot Web 的 FEATURE_VIRTUAL_KEYBOARD 是按运行时触屏探测
+                # ('ontouchstart' in window)开关的 —— setTouchEmulationEnabled
+                # 正好把它打开(setDeviceMetricsOverride{mobile:true} 不会)。
+                # LineEdit.virtual_keyboard_enabled 默认 true,于是 grab_focus()
+                # 时 Godot 会新建并聚焦一个贴在 canvas 旁边的隐藏 DOM <input>
+                # 来接软键盘输入,打在 canvas 上的键事件自然进不去。
+                #
+                # ⚠️ 推论:**真机上的文字输入走的就是这条 DOM 覆盖层路径,
+                # 这个测试完全没覆盖到。** 软键盘相关的行为只能真机验。
+
+            await page.send("Page.navigate", {"url": f"{url}/?player={name}"})
             await asyncio.sleep(10)          # 38 MB wasm,给足加载时间
 
-            await page.click(640, 392)        # 名字输入框
-            await page.type(NAME)
+            # ⚠️ 不用像素坐标。Login.gd 里 name_edit 开局就 grab_focus(),
+            # 软键盘的回车会触发 text_submitted —— 布局怎么改都不影响这里。
+            await page.type(name)
             await asyncio.sleep(1)
-            await page.click(640, 464)        # 「进入大厅」
+            await page.press_enter()
             await asyncio.sleep(12)
             if shot_path:
                 await page.shot(shot_path)
@@ -159,10 +216,16 @@ async def run(url, shot_path):
             return page.logs
     finally:
         chrome.kill()
+        # 两个档位顺序跑、共用固定的调试端口,kill 之后要真的等它退出,
+        # 否则下一个档位可能绑不上 9333,报一个完全看不懂的错。
+        try:
+            chrome.wait(timeout=5)
+        except Exception:
+            pass
         shutil.rmtree(profile, ignore_errors=True)
 
 
-def check(logs):
+def check(logs, mobile=False):
     """判定:进没进大厅。"""
     blob = "\n".join(logs)
     problems = []
@@ -186,6 +249,17 @@ def check(logs):
         problems.append("大厅「在线」列表里没有自己"
                         " —— join_lobby_async 是不是又把 self_presence 丢了?")
 
+    # 手机档位专属:逻辑视口必须是手机尺寸,不能是 1280。
+    # 桌面档位下 1024 宽是正常的,所以只在手机档位查。
+    if mobile:
+        m = re.search(r"逻辑视口 (\d+)x", blob)
+        if not m:
+            problems.append("没看到 [layout] 日志,量不出 UI 尺寸")
+        elif int(m.group(1)) > MOBILE_VIEWPORT_MAX:
+            problems.append(
+                f"逻辑视口宽 {m.group(1)},超过 {MOBILE_VIEWPORT_MAX}"
+                f" —— 基准分辨率还是桌面的,手机上内容会被缩得点不到")
+
     if "[config]" not in blob:
         problems.append("客户端没打印 [config]:服务器地址没推导出来")
 
@@ -194,7 +268,6 @@ def check(logs):
 
 def main():
     url = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else None
-    shot = os.path.join(tempfile.gettempdir(), "web_smoke.png")
     server = None
 
     if url is None:
@@ -206,23 +279,35 @@ def main():
         url = "http://localhost:8080"
         time.sleep(2)
 
+    failed = []
     try:
-        logs = asyncio.run(run(url, shot))
+        for tier in TIERS:
+            shot = os.path.join(
+                tempfile.gettempdir(),
+                f"web_smoke_{'mobile' if tier['win'] else 'desktop'}.png")
+            name = NAME_BASE + tier["tag"]
+            print(f"\n=== {tier['name']} ===")
+            logs = asyncio.run(run(url, shot, name, tier["win"]))
+            problems = check(logs, mobile=bool(tier["win"]))
+            print(f"  截图:{shot}")
+            if problems:
+                failed.append(tier["name"])
+                print(f"  ✗ {tier['name']} 失败:")
+                for p in problems:
+                    print(f"      - {p}")
+                print("    控制台最后 20 行:")
+                for line in logs[-20:]:
+                    print("      " + line[:180])
+            else:
+                print(f"  ✓ {tier['name']} 通过")
     finally:
         if server:
             server.terminate()
 
-    problems = check(logs)
-    print(f"  截图:{shot}")
-    if problems:
-        print("\n✗ Web 冒烟失败:")
-        for p in problems:
-            print(f"    - {p}")
-        print("\n  控制台最后 25 行:")
-        for line in logs[-25:]:
-            print("    " + line[:200])
+    if failed:
+        print("\n✗ Web 冒烟失败:" + "、".join(failed))
         return 1
-    print("✓ Web 冒烟通过:登录 → 大厅走通")
+    print("\n✓ Web 冒烟通过:桌面 + 手机竖屏,登录 → 大厅都走通")
     return 0
 
 

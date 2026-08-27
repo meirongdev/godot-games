@@ -9,44 +9,53 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_login")
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Margin" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
-[node name="Box" type="VBoxContainer" parent="Center"]
-custom_minimum_size = Vector2(440, 0)
+[node name="Row" type="HBoxContainer" parent="Margin"]
 layout_mode = 2
-theme_override_constants/separation = 18
+alignment = 1
 
-[node name="Title" type="Label" parent="Center/Box"]
+[node name="Col" type="VBoxContainer" parent="Margin/Row"]
+custom_minimum_size = Vector2(400, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 46
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Margin/Row/Col"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
 text = "家庭游戏大厅"
 horizontal_alignment = 1
 
-[node name="Hint" type="Label" parent="Center/Box"]
+[node name="Hint" type="Label" parent="Margin/Row/Col"]
 modulate = Color(1, 1, 1, 0.55)
 layout_mode = 2
 text = "输入名字,家里人就能在大厅看到你"
 horizontal_alignment = 1
+autowrap_mode = 3
 
-[node name="NameEdit" type="LineEdit" parent="Center/Box"]
-custom_minimum_size = Vector2(0, 56)
+[node name="NameEdit" type="LineEdit" parent="Margin/Row/Col"]
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
 placeholder_text = "你的名字"
 alignment = 1
 
-[node name="EnterButton" type="Button" parent="Center/Box"]
-custom_minimum_size = Vector2(0, 56)
+[node name="EnterButton" type="Button" parent="Margin/Row/Col"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 22
 text = "进入大厅"
 
-[node name="Status" type="Label" parent="Center/Box"]
+[node name="Status" type="Label" parent="Margin/Row/Col"]
 modulate = Color(1, 0.75, 0.4, 1)
 layout_mode = 2
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3

@@ -16,18 +16,23 @@ extends SceneTree
 
 const CHECKS := {
 	"res://src/lobby/Login.tscn": [
-		"Center/Box/NameEdit", "Center/Box/EnterButton", "Center/Box/Status",
+		"Margin/Row/Col/NameEdit", "Margin/Row/Col/EnterButton",
+		"Margin/Row/Col/Status",
 	],
 	"res://src/lobby/Lobby.tscn": [
-		"HBox/Left/OnlineList", "HBox/Left/ChatLog", "HBox/Left/ChatEdit",
-		"HBox/Right/RoomList", "HBox/Right/RefreshButton",
-		"HBox/Right/CreateBox/GameOption", "HBox/Right/CreateBox/RoomNameEdit",
-		"HBox/Right/CreateBox/CreateButton", "HBox/Right/Status",
+		"Margin/Row/Col/Segments/RoomsTab", "Margin/Row/Col/Segments/OnlineTab",
+		"Margin/Row/Col/Segments/ChatTab",
+		"Margin/Row/Col/Rooms/RoomList", "Margin/Row/Col/Online/OnlineList",
+		"Margin/Row/Col/Chat/ChatLog", "Margin/Row/Col/Chat/ChatEdit",
+		"Margin/Row/Col/CreateBox/GameOption",
+		"Margin/Row/Col/CreateBox/RoomNameEdit",
+		"Margin/Row/Col/CreateBox/CreateButton", "Margin/Row/Col/Status",
 	],
 	"res://src/room/Room.tscn": [
-		"VBox/Header/RoomTitle", "VBox/Header/LeaveButton",
-		"VBox/Body/PlayerPanel/PlayerList", "VBox/Body/PlayerPanel/ReadyButton",
-		"VBox/Body/PlayerPanel/StartButton", "VBox/Body/GameSlot", "VBox/Status",
+		"Margin/Row/Col/Header/RoomTitle", "Margin/Row/Col/Header/LeaveButton",
+		"Margin/Row/Col/PlayerStrip", "Margin/Row/Col/Actions/ReadyButton",
+		"Margin/Row/Col/Actions/StartButton", "Margin/Row/Col/GameSlot",
+		"Margin/Row/Col/Status",
 	],
 	"res://src/games/rps/RpsGame.tscn": [
 		"VBox/RoundLabel", "VBox/Countdown", "VBox/Hands",

@@ -22,7 +22,7 @@ func _ready() -> void:
 func _login() -> void:
 	var s: Control = load("res://src/lobby/Login.tscn").instantiate()
 	add_child(s)
-	s.get_node("Center/Box/NameEdit").text = "爸爸"
+	s.get_node("Margin/Row/Col/NameEdit").text = "爸爸"
 
 
 func _me() -> String:
@@ -37,7 +37,7 @@ func _lobby() -> void:
 	add_child(s)
 	# Lobby._ready 的 await 走墙钟、movie 的帧走渲染速度,固定帧数等不齐。
 	# 改成事件驱动:等它自己的首次刷新真正落地(列表出现条目)再注入。
-	var room_list: ItemList = s.get_node("HBox/Right/RoomList")
+	var room_list: ItemList = s.get_node("Margin/Row/Col/Rooms/RoomList")
 	for _i in range(600):
 		if room_list.item_count > 0:
 			break

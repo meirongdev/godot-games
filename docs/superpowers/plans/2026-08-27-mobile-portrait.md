@@ -16,11 +16,26 @@
 
 | # | spec 原文 | 计划改为 | 为什么 |
 |---|---|---|---|
-| 1 | 基准 `400×640` | **`432×640`** | 16 边距 ×2 + 400 内容列 = 432,算术正好对上。竖屏时逻辑视口恒为 432 宽,内容列恒为 400 |
+| 1 | 基准 `400×640` | **`432×700`** | 宽 432 = 16 边距 ×2 + 400 内容列,算术正好对上:手机竖屏宽高比(0.45~0.56)都低于分界线 432/700=0.617,一律宽度受限,逻辑视口恒为 432 宽、内容列恒为 400。高 700 而非 640:基准高度**对手机毫无影响**(手机全程由宽度决定),只管平板/桌面 —— 640 会让 iPad 768×1024 缩放到 1.60(按钮 70pt+),700 压到 1.46 |
 | 2 | 分段切换用 `TabContainer` | **三个 toggle `Button` + `ButtonGroup`** | `TabContainer` 的页签高度由主题 StyleBox 内边距决定,想做到 44pt 得自己写一套 StyleBox。页签是手机上的主导航,不能将就 |
 | 3 | §6 触控尺寸收进 `family.tres` 主题 | **不做** | 实测现有 `custom_minimum_size` 已经全是 44–56 **逻辑**像素,一个不缺 —— 手机上点不到纯粹是被 0.30 缩放害的。基准一改就全部达标。而 Theme 没有 min-height 属性,要靠 StyleBox 内边距实现,等于重写一套外观,风险远大于收益 |
 
-**偏差 3 是这个计划最重要的发现:** 触控尺寸不需要任何改动。
+**偏差 3 需要打个补丁(Task 3 的 code review 算出来的)。** 原话「基准一改就全部达标」
+只对 48/52 逻辑单位的控件成立,对 **44 的不成立**:
+
+因为 432 已经**等于或大于**最宽的真机(430 CSS px),所有手机的缩放系数都 ≤ 1.0
+(390 宽 → 0.903,360 宽 → 0.833),所以按 44 逻辑单位画的控件在真机上只有:
+
+| 机型 | 缩放 | 44 单位 → 实际 | 48 单位 → 实际 | 52 单位 → 实际 |
+|---|---|---|---|---|
+| 430×932(Pro Max) | 0.995 | 43.8pt | 47.8pt | 51.8pt |
+| 390×844(主流 iPhone) | 0.903 | **39.7pt** | 43.3pt | 46.9pt |
+| 360×800(小 Android) | 0.833 | **36.7pt** | 40.0pt | 43.3pt |
+
+44 在主流机上差 10%、在小屏上差 17%。所以本计划里**所有 44 都改成 48**
+(Task 5 的三个页签、Task 6 的「离开」按钮)。48 在主流机上是 43.3pt,
+基本贴住 44pt 这条线;要在 360 宽的机型上也严格 ≥44pt 得用 52,但那会让
+次要控件和主 CTA 一样大,不值得 —— 48 已经远高于 WCAG 2.5.8 AA 的 24px 底线。
 
 ---
 
@@ -426,7 +441,7 @@ modulate = Color(1, 1, 1, 0.55)
 layout_mode = 2
 text = "输入名字,家里人就能在大厅看到你"
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="NameEdit" type="LineEdit" parent="Margin/Row/Col"]
 custom_minimum_size = Vector2(0, 48)
@@ -444,7 +459,7 @@ text = "进入大厅"
 modulate = Color(1, 0.75, 0.4, 1)
 layout_mode = 2
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 `Row` 用 `alignment = 1`(居中)负责水平居中,`Col` 用 `alignment = 1` 负责垂直居中 —— 替代原来的 `CenterContainer`。**为什么不用 `CenterContainer`:** 它会把子节点压到最小尺寸,竖直方向也压,后面的大厅/房间需要「水平居中 + 竖直铺满」,`CenterContainer` 做不到。四个场景用同一个 `Margin → Row → Col` 结构。
@@ -510,10 +525,42 @@ feat(ui): 登录页改成 Margin→Row→Col 单列,字号收到新坐标系
 标题 46 → 30,输入框/按钮最小高 56 → 48/52:基准从 1280 变 432 之后
 坐标系小了 3 倍,原来的字号会占掉整屏。
 
+顺带修掉一个现存问题:原来 Center/Box 的 custom_minimum_size 是 440,
+比 432 宽的逻辑视口还宽,手机上边缘会被切掉一点。
+
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
+
+> 最后那段是执行期补的:Task 3 的 code review 发现 `Center/Box` 的 440 已经
+> 超过 432 的逻辑视口,正好被这一步的整份替换顺手修掉,值得记在 commit 里。
+
+---
+
+## 骨架的两条规则(Task 4 的 code review 从 Godot 引擎源码确认)
+
+`Margin → Row → Col` 已在 Task 4 落地并逐条验证过,Tasks 5–6 照抄。两条必须
+带着走的规则:
+
+1. **别给 `Col` 加带 EXPAND 的 `size_flags_horizontal`。**
+   `custom_minimum_size.x = 400` 是**下限,不是上限**。`box_container.cpp` 里
+   「居中」和「400 不被拉宽」用的是同一份 leftover space —— 子节点一 expand
+   就把 leftover 全吃掉,居中和限宽同时失效。手机上看不出来(432−32 正好
+   等于 400,leftover 本来就是 0),到桌面才炸。
+
+2. **凡是显示「自己控制不了的文字」的 Label,`autowrap_mode` 必须是 3
+   (`AUTOWRAP_WORD_SMART`),不能是 2(`AUTOWRAP_WORD`)。**
+   2 只在词间软换行,**不会**强行拆开一个超长的不可断 token;3 会。
+   `Status` 直接吃 `NakamaException.message` 和 `_rpc_error()` 兜底透出的
+   原始错误码 —— 一旦里面有 URL 或下划线连起来的长标识符,Label 的最小宽度
+   就超过 400,`Col` 的最小宽度跟着涨,而这条链上没有任何 `clip_contents`,
+   项目里也没有 `ScrollContainer` —— 直接横向溢出到屏幕外。
+   所以本计划里所有 `autowrap_mode` 一律写 3。
+
+另外确认过的两件事(可以放心依赖):`alignment = 1` 在 `HBoxContainer` 和
+`VBoxContainer` 上都是 CENTER;`Col` 默认在交叉轴(高度)上是 FILL,所以它
+真的铺满高度,Tasks 5–6 的 `size_flags_vertical = 3` 子节点能正常拿到剩余高度。
 
 ---
 
@@ -582,7 +629,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="RoomsTab" type="Button" parent="Margin/Row/Col/Segments"]
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
@@ -591,7 +638,7 @@ button_group = SubResource("segments")
 text = "房间"
 
 [node name="OnlineTab" type="Button" parent="Margin/Row/Col/Segments"]
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
@@ -599,7 +646,7 @@ button_group = SubResource("segments")
 text = "在线"
 
 [node name="ChatTab" type="Button" parent="Margin/Row/Col/Segments"]
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
@@ -667,7 +714,7 @@ text = "建房"
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.63, 0.36, 1)
 theme_override_font_sizes/font_size = 15
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 三个面板是 `Col` 的兄弟节点,同一时刻只有一个 `visible`,可见的那个吃掉剩余高度。`CreateBox` **始终可见** —— 建房是主操作,不该藏在页签后面。
@@ -867,10 +914,10 @@ size_flags_horizontal = 3
 size_flags_vertical = 4
 theme_override_font_sizes/font_size = 20
 text = "房间"
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="LeaveButton" type="Button" parent="Margin/Row/Col/Header"]
-custom_minimum_size = Vector2(72, 44)
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 size_flags_vertical = 4
 theme_override_font_sizes/font_size = 18
@@ -879,7 +926,7 @@ text = "离开"
 [node name="PlayerStrip" type="Label" parent="Margin/Row/Col"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="GameSlot" type="Control" parent="Margin/Row/Col"]
 layout_mode = 2
@@ -908,7 +955,7 @@ text = "开始游戏"
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 玩家名单从竖着的 `ItemList` 换成一个 `autowrap` 的 `Label`(`PlayerStrip`)—— 竖屏里竖直空间全要留给游戏区,而家庭局最多 8 人,一两行就写完了。

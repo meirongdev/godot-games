@@ -248,8 +248,15 @@ python3 tools/web_smoke.py                    # 本地:自己起 serve_web + 无
 python3 tools/web_smoke.py https://<web 域名>  # 线上:打真实部署
 ```
 
+它现在跑**两个档位**:桌面和**手机竖屏**(390×844 设备模拟)。手机档位额外断言
+**逻辑视口宽度 ≤ 480** —— 基准分辨率(432×700)要是被人改回桌面尺寸,这里立刻红。
+
 它在真浏览器里把制品从登录页跑进大厅,断言 `list_rooms` 发得出去、没有
-`result=8`、没有 `HTTPRequest failed`。上面 4 条 network 面板的检查,它覆盖了
+`result=8`、没有 `HTTPRequest failed`、自己出现在「在线」列表里。
+
+⚠️ **它只走到大厅。** 房间页、猜拳页的布局它不碰;唯一的几何断言是登录页打印的
+视口宽度;只查宽度不查高度;每档只登一个客户端;手机档位不开触摸模拟。
+覆盖边界的完整说明见 `docs/superpowers/specs/2026-08-27-mobile-portrait-design.md` §7。上面 4 条 network 面板的检查,它覆盖了
 前两条的实质(请求真的成功了),但**覆盖不了「肉眼看中文和 emoji」**。
 
 ⚠️ 跑它必须用无头模式或保证标签页可见:Chrome 对隐藏标签不跑
