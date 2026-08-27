@@ -38,11 +38,19 @@ import websockets
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 9333
 
-# 每次都要换名字:Chrome profile 是临时目录,IndexedDB 每跑一次都是空的,
-# 于是 Nakama 的设备 ID 每次重新生成 → 每次都是新账号。而 Nakama 的 username
-# 全局唯一,固定名字第二次跑就会撞上「Username is already in use」。
-# Login.gd 限名字最长 12 个字,所以只取时间戳后 6 位。
-NAME = "smoke" + str(int(time.time()))[-6:]
+# 名字每次都要换,而且两个档位之间也要不一样(理由见上)。
+# Login.gd 限名字最长 12 个字,所以 5 位时间戳 + 1 位档位标记。
+NAME_BASE = "smoke" + str(int(time.time()))[-5:]
+
+# 两个档位都要过。手机档位是这次的重点,桌面档位防回归。
+TIERS = [
+    {"name": "桌面", "win": None, "tag": "d"},
+    {"name": "手机竖屏", "win": (390, 844), "tag": "m"},
+]
+
+# 逻辑视口宽度的上限(手机档位)。基准分辨率不对时这里会是 1280,
+# 内容被缩到 30%,按钮实际高约 18pt —— iOS 的最小点击目标是 44pt。
+MOBILE_VIEWPORT_MAX = 480
 
 CHROME_CANDIDATES = [
     os.environ.get("CHROME", ""),
@@ -122,7 +130,7 @@ class Page:
         self._shots[mid] = path
 
 
-async def run(url, shot_path):
+async def run(url, shot_path, name, win=None):
     profile = tempfile.mkdtemp(prefix="web-smoke-")
     chrome = subprocess.Popen([
         find_chrome(), "--headless=new", f"--remote-debugging-port={PORT}",
@@ -153,12 +161,22 @@ async def run(url, shot_path):
             await page.send("Page.enable")
             pump = asyncio.create_task(page.pump())
 
-            await page.send("Page.navigate", {"url": f"{url}/?player={NAME}"})
+            if win:
+                await page.send("Emulation.setDeviceMetricsOverride", {
+                    "width": win[0], "height": win[1],
+                    "deviceScaleFactor": 3, "mobile": True})
+                # 特意不开 Emulation.setTouchEmulationEnabled:实测(A/B/C/D/E 五组
+                # 对照)一开它,Chrome headless 就吞掉 CDP 合成的键盘事件,name 打
+                # 不进去、Enter 也没反应,登录卡死在 [layout] 那行之后——跟视口
+                # 尺寸无关(单独开它、不带 metrics override 照样卡)。手机视口的
+                # 模拟只靠 setDeviceMetricsOverride 就够,不需要它。
+
+            await page.send("Page.navigate", {"url": f"{url}/?player={name}"})
             await asyncio.sleep(10)          # 38 MB wasm,给足加载时间
 
             # ⚠️ 不用像素坐标。Login.gd 里 name_edit 开局就 grab_focus(),
             # 软键盘的回车会触发 text_submitted —— 布局怎么改都不影响这里。
-            await page.type(NAME)
+            await page.type(name)
             await asyncio.sleep(1)
             await page.press_enter()
             await asyncio.sleep(12)
@@ -172,7 +190,7 @@ async def run(url, shot_path):
         shutil.rmtree(profile, ignore_errors=True)
 
 
-def check(logs):
+def check(logs, mobile=False):
     """判定:进没进大厅。"""
     blob = "\n".join(logs)
     problems = []
@@ -196,6 +214,17 @@ def check(logs):
         problems.append("大厅「在线」列表里没有自己"
                         " —— join_lobby_async 是不是又把 self_presence 丢了?")
 
+    # 手机档位专属:逻辑视口必须是手机尺寸,不能是 1280。
+    # 桌面档位下 1024 宽是正常的,所以只在手机档位查。
+    if mobile:
+        m = re.search(r"逻辑视口 (\d+)x", blob)
+        if not m:
+            problems.append("没看到 [layout] 日志,量不出 UI 尺寸")
+        elif int(m.group(1)) > MOBILE_VIEWPORT_MAX:
+            problems.append(
+                f"逻辑视口宽 {m.group(1)},超过 {MOBILE_VIEWPORT_MAX}"
+                f" —— 基准分辨率还是桌面的,手机上内容会被缩得点不到")
+
     if "[config]" not in blob:
         problems.append("客户端没打印 [config]:服务器地址没推导出来")
 
@@ -204,7 +233,6 @@ def check(logs):
 
 def main():
     url = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else None
-    shot = os.path.join(tempfile.gettempdir(), "web_smoke.png")
     server = None
 
     if url is None:
@@ -216,23 +244,34 @@ def main():
         url = "http://localhost:8080"
         time.sleep(2)
 
+    failed = []
     try:
-        logs = asyncio.run(run(url, shot))
+        for tier in TIERS:
+            shot = os.path.join(tempfile.gettempdir(),
+                                "web_smoke_%s.png" % ("mobile" if tier["win"] else "desktop"))
+            name = NAME_BASE + tier["tag"]
+            print(f"\n=== {tier['name']} ===")
+            logs = asyncio.run(run(url, shot, name, tier["win"]))
+            problems = check(logs, mobile=bool(tier["win"]))
+            print(f"  截图:{shot}")
+            if problems:
+                failed.append(tier["name"])
+                print(f"  ✗ {tier['name']} 失败:")
+                for p in problems:
+                    print(f"      - {p}")
+                print("    控制台最后 20 行:")
+                for line in logs[-20:]:
+                    print("      " + line[:180])
+            else:
+                print(f"  ✓ {tier['name']} 通过")
     finally:
         if server:
             server.terminate()
 
-    problems = check(logs)
-    print(f"  截图:{shot}")
-    if problems:
-        print("\n✗ Web 冒烟失败:")
-        for p in problems:
-            print(f"    - {p}")
-        print("\n  控制台最后 25 行:")
-        for line in logs[-25:]:
-            print("    " + line[:200])
+    if failed:
+        print("\n✗ Web 冒烟失败:" + "、".join(failed))
         return 1
-    print("✓ Web 冒烟通过:登录 → 大厅走通")
+    print("\n✓ Web 冒烟通过:桌面 + 手机竖屏,登录 → 大厅都走通")
     return 0
 
 
