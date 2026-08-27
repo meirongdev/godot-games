@@ -32,6 +32,7 @@ custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "准备中…"
+autowrap_mode = 3
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -74,6 +75,7 @@ modulate = Color(1, 1, 1, 0.7)
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 horizontal_alignment = 1
+autowrap_mode = 3
 
 [node name="Result" type="RichTextLabel" parent="VBox"]
 custom_minimum_size = Vector2(0, 120)
@@ -91,4 +93,5 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "你已出局,观战中"
+autowrap_mode = 3
 horizontal_alignment = 1

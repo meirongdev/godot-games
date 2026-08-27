@@ -68,8 +68,9 @@ func _apply_room_state(payload: Dictionary) -> void:
 			line = "👑" + line
 		if p["id"] == me:
 			line += "(我)"
-		if p["ready"]:
-			line += " ✓"
+		# 准备好打 ✓,没准备打 … —— 不能留空:空白读起来像「还在加载」,
+		# 而房主需要一眼看出是谁在拖着不开局。
+		line += " ✓" if p["ready"] else " …"
 		parts.append(line)
 	player_strip.text = "   ".join(parts)
 

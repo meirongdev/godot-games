@@ -300,7 +300,10 @@ func send(op_code: int, data: Dictionary = {}) -> void:
 func _on_match_state(state: NakamaRTAPI.MatchData) -> void:
 	var payload = JSON.parse_string(state.data)
 	var data: Dictionary = payload if payload is Dictionary else {}
-	if state.op_code == OpCodes.ROOM_STATE:
+	# 只缓存**当前房间**的状态。刚离开的房间可能还有一帧在路上,不校验的话
+	# 它会被缓存下来、再被 replay_room_state() 主动补发到下一个房间去 ——
+	# 而在加缓存之前,这种迟到帧顶多是一次无害的 emit,不会留下来。
+	if state.op_code == OpCodes.ROOM_STATE and state.match_id == _match_id:
 		_last_room_state = data
 	room_event.emit(state.op_code, data)
 
