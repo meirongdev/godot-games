@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,23 @@ CHROME_CANDIDATES = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
 ]
+
+
+def assert_port_free():
+    """调试端口必须是干净的,否则会连错浏览器。
+
+    ⚠️ 这不是洁癖。PORT 是固定的,而 run() 靠 `/json/list` 找页面 target ——
+    端口上要是还挂着上一次没退干净的 Chrome(比如被 kill 掉的自动化任务留下的),
+    我们会**连上那个旧浏览器**并驱动它。它身上可能还留着上次的
+    setDeviceMetricsOverride,于是「桌面档位」跑出手机视口,断言以
+    「没能进大厅」的形式失败 —— 症状和真实的代码回归一模一样,
+    2026-08-27 为此白查了一轮。宁可一开始就报错。
+    """
+    with socket.socket() as sock:
+        if sock.connect_ex(("127.0.0.1", PORT)) == 0:
+            sys.exit(
+                f"✗ 调试端口 {PORT} 已被占用 —— 很可能是上次没退干净的 Chrome。\n"
+                f"  先清掉再跑:lsof -ti tcp:{PORT} | xargs -r kill -9")
 
 
 def find_chrome():
@@ -131,6 +149,7 @@ class Page:
 
 
 async def run(url, shot_path, name, win=None):
+    assert_port_free()
     profile = tempfile.mkdtemp(prefix="web-smoke-")
     chrome = subprocess.Popen([
         find_chrome(), "--headless=new", f"--remote-debugging-port={PORT}",
