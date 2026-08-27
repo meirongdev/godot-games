@@ -40,6 +40,9 @@ func _process(delta: float) -> void:
 
 
 func _on_presence_changed(users: Array) -> void:
+	# 打一行给排查用:「在线」是空的还是没刷新,光看截图分不出来。
+	# tools/web_smoke.py 也靠这一行断言自己进了在线列表。
+	print("[lobby] 在线 %d 人" % users.size())
 	online_list.clear()
 	var me := ServerConnection.get_user_id()
 	users.sort_custom(func(a, b): return a["id"] == me)   # 自己排最前

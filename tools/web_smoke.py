@@ -24,6 +24,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -178,6 +179,12 @@ def check(logs):
 
     if "HTTPRequest failed" in blob:
         problems.append("有请求失败(HTTPRequest failed)")
+
+    # 自己必须出现在「在线」里。channel.presences 不含自己,自己是靠一条单独的
+    # presence 事件来的 —— 那条事件和 join 的 await 有竞争,曾经时灵时不灵。
+    if not any(re.search(r"\[lobby\] 在线 [1-9]", line) for line in logs):
+        problems.append("大厅「在线」列表里没有自己"
+                        " —— join_lobby_async 是不是又把 self_presence 丢了?")
 
     if "[config]" not in blob:
         problems.append("客户端没打印 [config]:服务器地址没推导出来")

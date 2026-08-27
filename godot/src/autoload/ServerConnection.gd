@@ -119,6 +119,13 @@ func join_lobby_async() -> int:
 		return err
 	_lobby_channel = channel.id
 	_lobby_users.clear()
+	# ⚠️ channel.presences 里**没有自己**(实测:join 响应的 presences 是空数组,
+	# 自己在 channel.self_presence 里)。自己是靠一条单独的 presence 事件送来的,
+	# 而那条事件常常在上面那个 await 期间就到了 —— 然后被这里的 clear() 抹掉,
+	# 于是「在线」列表里看不见自己,还时灵时不灵(取决于事件和 await 谁先)。
+	# 所以自己从 self_presence 补,不赌那条事件的到达时机。
+	if channel.self_presence != null:
+		_lobby_users[channel.self_presence.user_id] = channel.self_presence.username
 	for p in channel.presences:
 		_lobby_users[p.user_id] = p.username
 	lobby_presence_changed.emit(_lobby_users_list())
