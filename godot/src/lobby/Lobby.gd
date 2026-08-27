@@ -2,34 +2,52 @@ extends Control
 
 const REFRESH_INTERVAL := 3.0   # Nakama 没有房间列表推送,只能轮询
 
-@onready var online_list: ItemList = $HBox/Left/OnlineList
-@onready var chat_log: RichTextLabel = $HBox/Left/ChatLog
-@onready var chat_edit: LineEdit = $HBox/Left/ChatEdit
-@onready var room_list: ItemList = $HBox/Right/RoomList
-@onready var refresh_button: Button = $HBox/Right/RefreshButton
-@onready var game_option: OptionButton = $HBox/Right/CreateBox/GameOption
-@onready var room_name_edit: LineEdit = $HBox/Right/CreateBox/RoomNameEdit
-@onready var create_button: Button = $HBox/Right/CreateBox/CreateButton
-@onready var status: Label = $HBox/Right/Status
+@onready var online_list: ItemList = $Margin/Row/Col/Online/OnlineList
+@onready var chat_log: RichTextLabel = $Margin/Row/Col/Chat/ChatLog
+@onready var chat_edit: LineEdit = $Margin/Row/Col/Chat/ChatEdit
+@onready var room_list: ItemList = $Margin/Row/Col/Rooms/RoomList
+@onready var game_option: OptionButton = $Margin/Row/Col/CreateBox/GameOption
+@onready var room_name_edit: LineEdit = $Margin/Row/Col/CreateBox/RoomNameEdit
+@onready var create_button: Button = $Margin/Row/Col/CreateBox/CreateButton
+@onready var status: Label = $Margin/Row/Col/Status
+
+@onready var _panels := {
+	"rooms":  $Margin/Row/Col/Rooms,
+	"online": $Margin/Row/Col/Online,
+	"chat":   $Margin/Row/Col/Chat,
+}
 
 var _rooms: Array = []
 var _timer := 0.0
 var _busy := false
 
 
-
 func _ready() -> void:
 	ServerConnection.lobby_presence_changed.connect(_on_presence_changed)
 	ServerConnection.lobby_message.connect(_on_message)
-	refresh_button.pressed.connect(_refresh_rooms)
 	create_button.pressed.connect(_on_create_pressed)
 	chat_edit.text_submitted.connect(_on_chat_submitted)
 	room_list.item_activated.connect(_on_room_activated)
+
+	# 竖屏一屏放不下「房间/在线/聊天」三块,用分段切换。
+	# 用三个 toggle Button 而不是 TabContainer:页签是手机上的主导航,
+	# 必须够大(≥44),而 TabContainer 的页签高度由主题 StyleBox 的内边距
+	# 决定,想做到 44 得自己写一套 StyleBox。Button 一个 custom_minimum_size
+	# 就够了。互斥由 .tscn 里的 ButtonGroup 保证。
+	$Margin/Row/Col/Segments/RoomsTab.pressed.connect(_show_segment.bind("rooms"))
+	$Margin/Row/Col/Segments/OnlineTab.pressed.connect(_show_segment.bind("online"))
+	$Margin/Row/Col/Segments/ChatTab.pressed.connect(_show_segment.bind("chat"))
+
 	status.text = ""
 
 	await ServerConnection.join_lobby_async()
 	await _load_games()
 	_refresh_rooms()
+
+
+func _show_segment(which: String) -> void:
+	for key in _panels:
+		_panels[key].visible = key == which
 
 
 func _process(delta: float) -> void:

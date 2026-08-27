@@ -20,10 +20,13 @@ const CHECKS := {
 		"Margin/Row/Col/Status",
 	],
 	"res://src/lobby/Lobby.tscn": [
-		"HBox/Left/OnlineList", "HBox/Left/ChatLog", "HBox/Left/ChatEdit",
-		"HBox/Right/RoomList", "HBox/Right/RefreshButton",
-		"HBox/Right/CreateBox/GameOption", "HBox/Right/CreateBox/RoomNameEdit",
-		"HBox/Right/CreateBox/CreateButton", "HBox/Right/Status",
+		"Margin/Row/Col/Segments/RoomsTab", "Margin/Row/Col/Segments/OnlineTab",
+		"Margin/Row/Col/Segments/ChatTab",
+		"Margin/Row/Col/Rooms/RoomList", "Margin/Row/Col/Online/OnlineList",
+		"Margin/Row/Col/Chat/ChatLog", "Margin/Row/Col/Chat/ChatEdit",
+		"Margin/Row/Col/CreateBox/GameOption",
+		"Margin/Row/Col/CreateBox/RoomNameEdit",
+		"Margin/Row/Col/CreateBox/CreateButton", "Margin/Row/Col/Status",
 	],
 	"res://src/room/Room.tscn": [
 		"VBox/Header/RoomTitle", "VBox/Header/LeaveButton",
