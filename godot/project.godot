@@ -11,10 +11,17 @@ ServerConnection="*res://src/autoload/ServerConnection.gd"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=800
-; canvas_items + expand:UI 跟着窗口缩放,同时适应不同宽高比。
-; 不设的话内容固定在基准分辨率的左上角尺寸,窗口放大只是留白变多。
+; ⚠️ 基准分辨率是**竖屏方向**的,这不是笔误。
+; canvas_items + expand 的缩放系数是 min(窗口宽/基准宽, 窗口高/基准高) ——
+; **短边决定一切**。基准 1280×800 时,390 宽的手机只能缩到
+; min(390/1280, 844/800) = 0.30,按钮实际高约 18pt(iOS 最小点击目标 44pt)。
+;
+; 432 = 16 边距 ×2 + 400 内容列。竖屏时宽度是限制项,逻辑视口恒为 432 宽,
+; 内容列恒为 400 —— 算术正好对上,不需要 max-width 逻辑。
+; 桌面 1280×800 时高度是限制项,缩放 1.25,逻辑视口 1024×640,400 的列居中。
+; 详见 docs/superpowers/specs/2026-08-27-mobile-portrait-design.md §4。
+window/size/viewport_width=432
+window/size/viewport_height=640
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
