@@ -23,6 +23,7 @@ var _lobby_channel := ""
 var _match_id := ""
 var _lobby_users := {}   # user_id -> username
 var _config: NakamaConfig
+var _reconnecting := false
 
 
 func _ready() -> void:
@@ -96,16 +97,57 @@ func set_display_name_async(name: String) -> int:
 # ---------------------------------------------------------------- Socket
 
 func connect_to_server_async() -> int:
-	_socket = Nakama.create_socket_from(_client)
-	_socket.connected.connect(func(): socket_connected.emit())
-	_socket.closed.connect(func(): socket_closed.emit())
-	_socket.received_error.connect(func(e): push_error("[socket] %s" % e))
-	_socket.received_match_state.connect(_on_match_state)
-	_socket.received_channel_message.connect(_on_channel_message)
-	_socket.received_channel_presence.connect(_on_channel_presence)
+	# ⚠️ socket 只建**一次**,重连复用同一个对象。
+	# Nakama.create_socket_from() 每次都会 add_child 一个新的适配器节点,
+	# 断线时每 3 秒重连一次的话,一次断网就能堆出几百个还在 _process 里
+	# 空转的节点。适配器内部本来就复用同一个 WebSocketPeer,连都能重连。
+	if _socket == null:
+		_socket = Nakama.create_socket_from(_client)
+		_socket.connected.connect(func(): socket_connected.emit())
+		_socket.closed.connect(func(): socket_closed.emit())
+		_socket.received_error.connect(func(e): push_error("[socket] %s" % e))
+		_socket.received_match_state.connect(_on_match_state)
+		_socket.received_channel_message.connect(_on_channel_message)
+		_socket.received_channel_presence.connect(_on_channel_presence)
 
-	var res = await _socket.connect_async(_session)
+	# SDK 默认的连接超时是 3 秒,和 HTTP 那边一样对手机网络太紧。
+	var res = await _socket.connect_async(_session, false, REQUEST_TIMEOUT_SEC)
 	return _check(res)
+
+
+## socket 还活着吗。只报告,不修 —— 要修用 ensure_socket_async()。
+func is_socket_connected() -> bool:
+	return _socket != null and _socket.is_connected_to_host()
+
+
+## 断线自愈。**每个用到 socket 的操作都要先过这一关。**
+##
+## socket 是家用场景里最脆的一环:手机锁屏、切后台、Wi-Fi 抖动、服务端重启
+## 都会断。麻烦在于断了之后 **HTTP 还是通的** —— 大厅的房间列表照常 3 秒一刷,
+## 页面看上去一切正常,其实 socket 那一半(聊天、在线列表、进房、建房)全废,
+## 而且只报一句英文的 "Request cancelled.",没人看得懂。
+func ensure_socket_async() -> int:
+	if is_socket_connected():
+		return OK
+
+	# 同一时刻只能有一次重连在飞。大厅每 3 秒自己试一次,用户又可能正好点了
+	# 建房 —— 两次 connect_async 撞上会把 SDK 内部那个 _conn 换掉,先来的
+	# await 就永远回不来,表现成「点了建房没反应」。
+	if _reconnecting:
+		while _reconnecting:
+			await get_tree().process_frame
+		return OK if is_socket_connected() else ERR_CANT_CONNECT
+
+	_reconnecting = true
+	var err := await connect_to_server_async()
+	if err == OK:
+		# 重连之后大厅频道要重新加入,否则聊天和在线列表还是死的。
+		await join_lobby_async()
+	_reconnecting = false
+
+	if err != OK:
+		error_message = "和服务器断开了,检查一下网络"
+	return err
 
 
 # ---------------------------------------------------------------- 大厅
@@ -187,6 +229,13 @@ func list_games_async() -> Array:
 
 ## 建房并直接进去。返回 match_id,失败返回空串。
 func create_room_async(game: String, name: String) -> String:
+	# ⚠️ socket 必须在**发 RPC 之前**确认。create_room 走的是 HTTP,socket 死了
+	# 它照样成功 —— 于是服务端多一个没人进的空房(要空置 60 秒才自动关),
+	# 客户端却因为 join_match 失败而返回空串。用户看到的是「建不出房间」,
+	# 再点几次,5 次/分钟的建房额度就被这些空房吃光,变成「建房太频繁了」,
+	# 从此彻底建不出来 —— 这就是「玩一局退出后就无法再创建房间」的形状。
+	if await ensure_socket_async() != OK:
+		return ""
 	var res = await _client.rpc_async(_session, "create_room",
 		JSON.stringify({"game": game, "name": name}))
 	if _check(res) != OK:
@@ -216,6 +265,8 @@ func _rpc_error(payload: Dictionary) -> String:
 
 
 func join_room_async(match_id: String) -> int:
+	if await ensure_socket_async() != OK:
+		return ERR_CANT_CONNECT
 	var m = await _socket.join_match_async(match_id)
 	var err := _check(m)
 	if err != OK:

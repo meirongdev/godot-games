@@ -77,6 +77,13 @@ func _refresh_rooms() -> void:
 	if _busy:
 		return
 	_busy = true
+	# ⚠️ 房间列表是 HTTP 轮询,socket 死了它照样刷新 —— 页面看着一切正常,
+	# 其实聊天、在线列表、进房、建房全废。所以断线要在这里主动修,
+	# 不能等用户点了建房才发现。_busy 顺便保证了 3 秒最多试一次,不会打炮。
+	if not ServerConnection.is_socket_connected():
+		status.text = "和服务器断开了,正在重连…"
+		status.text = "" if await ServerConnection.ensure_socket_async() == OK \
+			else ServerConnection.error_message
 	_rooms = await ServerConnection.list_rooms_async()
 	_busy = false
 
