@@ -9,8 +9,22 @@ const NAME_KEY := "user://display_name.cfg"
 
 func _ready() -> void:
 	enter_button.pressed.connect(_on_enter_pressed)
+	# 手机上软键盘的「完成/换行」键要能直接进去,不用去够按钮。
+	# 顺带让 tools/web_smoke.py 不再需要按钮的像素坐标。
+	name_edit.text_submitted.connect(func(_text: String): _on_enter_pressed())
 	name_edit.text = _load_name()
+	# 打开就能打字。手机上这会顺带唤起软键盘 —— 第一屏就是让你输名字,合理。
+	name_edit.grab_focus()
 	status.text = ""
+
+	# 给排查用:这台设备上 UI 实际多大。web_smoke.py 的手机档位靠这一行断言
+	# 逻辑视口宽度 —— 基准分辨率不对的话,手机上一切都会被缩到 30%。
+	# 见 docs/superpowers/specs/2026-08-27-mobile-portrait-design.md §3。
+	var win := get_window().size
+	var vp := get_viewport_rect().size
+	print("[layout] 窗口 %dx%d → 逻辑视口 %dx%d(缩放 %.2f)" % [
+		win.x, win.y, int(vp.x), int(vp.y), float(win.x) / vp.x])
+
 	# 配置坏了就别等用户填完名字再告诉他 —— 一进门就说,而且把按钮关掉。
 	if not ServerConnection.is_configured():
 		status.text = "连不上服务器:%s" % ServerConnection.error_message

@@ -108,6 +108,13 @@ class Page:
                 await self.send("Input.dispatchKeyEvent", dict(base, type=t))
                 await asyncio.sleep(0.02)
 
+    async def press_enter(self):
+        base = {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13,
+                "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"}
+        for t in ("keyDown", "char", "keyUp"):
+            await self.send("Input.dispatchKeyEvent", dict(base, type=t))
+            await asyncio.sleep(0.03)
+
     async def shot(self, path):
         mid = await self.send("Page.captureScreenshot", {"format": "png"})
         self._shots[mid] = path
@@ -147,10 +154,11 @@ async def run(url, shot_path):
             await page.send("Page.navigate", {"url": f"{url}/?player={NAME}"})
             await asyncio.sleep(10)          # 38 MB wasm,给足加载时间
 
-            await page.click(640, 392)        # 名字输入框
+            # ⚠️ 不用像素坐标。Login.gd 里 name_edit 开局就 grab_focus(),
+            # 软键盘的回车会触发 text_submitted —— 布局怎么改都不影响这里。
             await page.type(NAME)
             await asyncio.sleep(1)
-            await page.click(640, 464)        # 「进入大厅」
+            await page.press_enter()
             await asyncio.sleep(12)
             if shot_path:
                 await page.shot(shot_path)
