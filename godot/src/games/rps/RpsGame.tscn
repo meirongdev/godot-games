@@ -28,15 +28,15 @@ anchor_bottom = 1.0
 theme_override_constants/separation = 14
 
 [node name="RoundLabel" type="Label" parent="VBox"]
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 20
 text = "准备中…"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Countdown" type="ProgressBar" parent="VBox"]
-custom_minimum_size = Vector2(0, 18)
+custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
 max_value = 1.0
 step = 0.001
@@ -44,27 +44,29 @@ value = 1.0
 show_percentage = false
 
 [node name="Hands" type="HBoxContainer" parent="VBox"]
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(0, 118)
 layout_mode = 2
-theme_override_constants/separation = 20
-alignment = 1
+theme_override_constants/separation = 10
 
 [node name="RockButton" type="Button" parent="VBox/Hands"]
-custom_minimum_size = Vector2(140, 140)
+custom_minimum_size = Vector2(0, 110)
 layout_mode = 2
-theme_override_font_sizes/font_size = 64
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 44
 text = "✊"
 
 [node name="PaperButton" type="Button" parent="VBox/Hands"]
-custom_minimum_size = Vector2(140, 140)
+custom_minimum_size = Vector2(0, 110)
 layout_mode = 2
-theme_override_font_sizes/font_size = 64
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 44
 text = "✋"
 
 [node name="ScissorButton" type="Button" parent="VBox/Hands"]
-custom_minimum_size = Vector2(140, 140)
+custom_minimum_size = Vector2(0, 110)
 layout_mode = 2
-theme_override_font_sizes/font_size = 64
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 44
 text = "✌"
 
 [node name="WaitLabel" type="Label" parent="VBox"]
@@ -74,10 +76,10 @@ layout_mode = 2
 horizontal_alignment = 1
 
 [node name="Result" type="RichTextLabel" parent="VBox"]
-custom_minimum_size = Vector2(0, 160)
+custom_minimum_size = Vector2(0, 120)
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/normal_font_size = 22
+theme_override_font_sizes/normal_font_size = 17
 theme_override_styles/normal = SubResource("panel")
 bbcode_enabled = true
 scroll_following = true
@@ -85,8 +87,8 @@ scroll_following = true
 [node name="Spectator" type="Label" parent="VBox"]
 modulate = Color(1, 1, 1, 0.6)
 visible = false
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-theme_override_font_sizes/font_size = 22
+theme_override_font_sizes/font_size = 18
 text = "你已出局,观战中"
 horizontal_alignment = 1
