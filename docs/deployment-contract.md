@@ -235,6 +235,27 @@ NAKAMA_HOST=... NAKAMA_TLS=1 NAKAMA_KEY=... \
 §4.1 的模块验证、全部文档截图和一次真人 playtest —— 因为那些全跑在桌面
 Godot 上(有系统字体回退)。**只有开一次网页能抓到它。**
 
+同一天第二个教训,形状一模一样:Godot 在 Web 上的 HTTP 走浏览器 `fetch`,
+响应体已被浏览器解过 gzip,Godot 按 `Content-Encoding` 再解一次必然失败
+(`result=8`,而 response code 是 **200**)—— 服务端成功、客户端拿不到响应,
+登录永远卡在「连接中…」。桌面版和 `e2e_match.py` 各走各的 HTTP 栈,一样测不到。
+细节与修法见 `docs/nakama-godot-guide.md`「本地改动」。
+
+**这一步现在有自动化替身了**(但线上那次仍然要人开一眼,见上面第 2、3 条):
+
+```bash
+python3 tools/web_smoke.py                    # 本地:自己起 serve_web + 无头 Chrome
+python3 tools/web_smoke.py https://<web 域名>  # 线上:打真实部署
+```
+
+它在真浏览器里把制品从登录页跑进大厅,断言 `list_rooms` 发得出去、没有
+`result=8`、没有 `HTTPRequest failed`。上面 4 条 network 面板的检查,它覆盖了
+前两条的实质(请求真的成功了),但**覆盖不了「肉眼看中文和 emoji」**。
+
+⚠️ 跑它必须用无头模式或保证标签页可见:Chrome 对隐藏标签不跑
+`requestAnimationFrame`,而 Godot 的主循环挂在 rAF 上 —— 标签一隐藏引擎直接
+不转,任何等待都会超时,看起来像「网络卡住」,极容易误判成服务端问题。
+
 ### 4.3 web 镜像验证
 
 ```bash
