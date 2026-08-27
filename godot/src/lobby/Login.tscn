@@ -40,7 +40,7 @@ modulate = Color(1, 1, 1, 0.55)
 layout_mode = 2
 text = "输入名字,家里人就能在大厅看到你"
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="NameEdit" type="LineEdit" parent="Margin/Row/Col"]
 custom_minimum_size = Vector2(0, 48)
@@ -58,4 +58,4 @@ text = "进入大厅"
 modulate = Color(1, 0.75, 0.4, 1)
 layout_mode = 2
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
