@@ -9,11 +9,13 @@ const NAME_KEY := "user://display_name.cfg"
 
 func _ready() -> void:
 	enter_button.pressed.connect(_on_enter_pressed)
-	# 回车/软键盘「完成」键也能提交。⚠️ 真机上这条路**可能根本不通**:
-	# 开了 html/experimental_virtual_keyboard 之后,Godot 的 LineEdit 在
-	# 触屏设备上把输入交给一个隐藏的 DOM <input>,而 Enter 触发不了
-	# text_submitted(上游 issue godotengine/godot#76215,3.5.1~4.x 都有)。
-	# 所以「进入大厅」按钮才是可靠路径,这里只是顺手;
+	# 回车/软键盘「完成」键也能提交。这条路在 Web 上历史上不可靠:开了
+	# html/experimental_virtual_keyboard 之后,LineEdit 把输入交给隐藏的
+	# DOM <input>,那时 Enter 不触发 text_submitted(上游 issue
+	# godotengine/godot#76215,报告于 3.5.1 和 4.0.2)。该 issue 由 PR
+	# #113461 修复、合入 4.6 里程碑,早于本项目用的 4.7.2,所以大概率
+	# 已经好了 —— 但**我们没在真机上复测过**。
+	# 所以「进入大厅」按钮才是主路径,这里只是顺手多一条;
 	# tools/web_smoke.py 靠它免掉像素坐标(那边不开触屏模拟,所以走得通)。
 	name_edit.text_submitted.connect(func(_text: String): _on_enter_pressed())
 	name_edit.text = _load_name()
