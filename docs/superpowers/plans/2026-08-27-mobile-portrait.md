@@ -441,7 +441,7 @@ modulate = Color(1, 1, 1, 0.55)
 layout_mode = 2
 text = "输入名字,家里人就能在大厅看到你"
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="NameEdit" type="LineEdit" parent="Margin/Row/Col"]
 custom_minimum_size = Vector2(0, 48)
@@ -459,7 +459,7 @@ text = "进入大厅"
 modulate = Color(1, 0.75, 0.4, 1)
 layout_mode = 2
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 `Row` 用 `alignment = 1`(居中)负责水平居中,`Col` 用 `alignment = 1` 负责垂直居中 —— 替代原来的 `CenterContainer`。**为什么不用 `CenterContainer`:** 它会把子节点压到最小尺寸,竖直方向也压,后面的大厅/房间需要「水平居中 + 竖直铺满」,`CenterContainer` 做不到。四个场景用同一个 `Margin → Row → Col` 结构。
@@ -535,6 +535,32 @@ EOF
 
 > 最后那段是执行期补的:Task 3 的 code review 发现 `Center/Box` 的 440 已经
 > 超过 432 的逻辑视口,正好被这一步的整份替换顺手修掉,值得记在 commit 里。
+
+---
+
+## 骨架的两条规则(Task 4 的 code review 从 Godot 引擎源码确认)
+
+`Margin → Row → Col` 已在 Task 4 落地并逐条验证过,Tasks 5–6 照抄。两条必须
+带着走的规则:
+
+1. **别给 `Col` 加带 EXPAND 的 `size_flags_horizontal`。**
+   `custom_minimum_size.x = 400` 是**下限,不是上限**。`box_container.cpp` 里
+   「居中」和「400 不被拉宽」用的是同一份 leftover space —— 子节点一 expand
+   就把 leftover 全吃掉,居中和限宽同时失效。手机上看不出来(432−32 正好
+   等于 400,leftover 本来就是 0),到桌面才炸。
+
+2. **凡是显示「自己控制不了的文字」的 Label,`autowrap_mode` 必须是 3
+   (`AUTOWRAP_WORD_SMART`),不能是 2(`AUTOWRAP_WORD`)。**
+   2 只在词间软换行,**不会**强行拆开一个超长的不可断 token;3 会。
+   `Status` 直接吃 `NakamaException.message` 和 `_rpc_error()` 兜底透出的
+   原始错误码 —— 一旦里面有 URL 或下划线连起来的长标识符,Label 的最小宽度
+   就超过 400,`Col` 的最小宽度跟着涨,而这条链上没有任何 `clip_contents`,
+   项目里也没有 `ScrollContainer` —— 直接横向溢出到屏幕外。
+   所以本计划里所有 `autowrap_mode` 一律写 3。
+
+另外确认过的两件事(可以放心依赖):`alignment = 1` 在 `HBoxContainer` 和
+`VBoxContainer` 上都是 CENTER;`Col` 默认在交叉轴(高度)上是 FILL,所以它
+真的铺满高度,Tasks 5–6 的 `size_flags_vertical = 3` 子节点能正常拿到剩余高度。
 
 ---
 
@@ -688,7 +714,7 @@ text = "建房"
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.63, 0.36, 1)
 theme_override_font_sizes/font_size = 15
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 三个面板是 `Col` 的兄弟节点,同一时刻只有一个 `visible`,可见的那个吃掉剩余高度。`CreateBox` **始终可见** —— 建房是主操作,不该藏在页签后面。
@@ -888,7 +914,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 4
 theme_override_font_sizes/font_size = 20
 text = "房间"
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="LeaveButton" type="Button" parent="Margin/Row/Col/Header"]
 custom_minimum_size = Vector2(72, 48)
@@ -900,7 +926,7 @@ text = "离开"
 [node name="PlayerStrip" type="Label" parent="Margin/Row/Col"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="GameSlot" type="Control" parent="Margin/Row/Col"]
 layout_mode = 2
@@ -929,7 +955,7 @@ text = "开始游戏"
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3
 ```
 
 玩家名单从竖着的 `ItemList` 换成一个 `autowrap` 的 `Label`(`PlayerStrip`)—— 竖屏里竖直空间全要留给游戏区,而家庭局最多 8 人,一两行就写完了。
