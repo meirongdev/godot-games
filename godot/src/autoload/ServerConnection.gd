@@ -75,7 +75,22 @@ func get_username() -> String:
 ## 改显示名。设备认证给的默认用户名是一串随机字符,家里人认不出。
 func set_display_name_async(name: String) -> int:
 	var res = await _client.update_account_async(_session, name, name)
-	return _check(res)
+	var err := _check(res)
+	if err != OK:
+		return err
+
+	# ⚠️ 改名只落库,**不会**动已经签发的 session —— token 里的 usn 还是认证那一刻
+	# 的随机用户名。而大厅「在线」列表读的是 presence 的 username,presence 又是
+	# socket 连接时用的 token 里的那个。不刷新的话家里人在大厅看到的还是随机串,
+	# 「输入名字,家里人就能在大厅看到你」这句话直接不成立。
+	# 必须在 connect_to_server_async() 之前刷 —— socket 认的是连接那一刻的 token。
+	var refreshed = await _client.session_refresh_async(_session)
+	if refreshed != null and not refreshed.is_exception():
+		_session = refreshed
+	else:
+		# 名字是门面,不是入场券:刷不动也让人进得去,只是列表里显示的是旧名。
+		push_error("[Nakama] 改名后刷新 session 失败,大厅里会显示旧用户名")
+	return OK
 
 
 # ---------------------------------------------------------------- Socket
