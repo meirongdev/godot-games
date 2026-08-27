@@ -4,13 +4,20 @@
 
 **Goal:** 让 Godot Web 版家庭游戏大厅在手机竖屏浏览器里可玩 —— 内容铺满屏幕、按钮点得到、大厅是单列。
 
-**Architecture:** 根因是基准分辨率。`canvas_items` + `expand` 的缩放系数是 `min(窗口宽/基准宽, 窗口高/基准高)`,基准 1280×800 在 390 宽的手机上只能缩到 0.30。把基准改成竖屏方向的 **432×640**(= 16 边距 ×2 + 400 内容列),缩放就回到 ≈1.0。四个场景统一成 `MarginContainer → HBoxContainer(居中) → VBoxContainer(400 宽)`,大厅的左右两栏合成单列 + 分段切换。
+**Architecture:** 根因是基准分辨率。`canvas_items` + `expand` 的缩放系数是 `min(窗口宽/基准宽, 窗口高/基准高)`,基准 1280×800 在 390 宽的手机上只能缩到 0.30。把基准改成竖屏方向的 **432×700**(宽 432 = 16 边距 ×2 + 400 内容列),缩放就回到 ≈1.0。四个场景统一成 `MarginContainer → HBoxContainer(居中) → VBoxContainer(400 宽)`,大厅的左右两栏合成单列 + 分段切换。
 
 **Tech Stack:** Godot 4.7.2(GDScript、`.tscn`)、Python 3(CDP 驱动无头 Chrome)、Nakama 3.40.0(本地 docker compose)
 
 **Spec:** [`docs/superpowers/specs/2026-08-27-mobile-portrait-design.md`](../specs/2026-08-27-mobile-portrait-design.md)
 
 ---
+
+## ⚠️ 这份计划是执行记录,不是最终事实
+
+执行期又改了几处,并非全部回填到下面的正文里。**具体数字以
+`docs/superpowers/specs/2026-08-27-mobile-portrait-design.md` 和实际代码为准。**
+正文里引用的 commit message 是当时的原文,即使后来又改过也照原样保留
+(比如 `3f1c27a` 那条确实写的是 432×640,是后一个 commit `32e1cf4` 才把高度提到 700)。
 
 ## ⚠️ 与 spec 的三处偏差(实现期发现,Task 9 会同步回 spec)
 
@@ -1244,7 +1251,7 @@ Expected:`/tmp/bot.log` 里依次出现 `[bot] 进房`、`[bot] 已准备`、`[b
 `tools/take_screenshots.py` 里 `--resolution 1280x800` 改成从环境变量取,默认竖屏:
 
 ```python
-RES = os.environ.get("SHOT_RES", "432x866")
+RES = os.environ.get("SHOT_RES", "432x700")
 ```
 
 并把 subprocess 那一行的 `"--resolution", "1280x800"` 改成 `"--resolution", RES`。
@@ -1256,7 +1263,8 @@ RES = os.environ.get("SHOT_RES", "432x866")
 
 前置: cd nakama && docker compose up -d(harness 要真实登录拿 user_id)
 
-分辨率默认 432x866(手机竖屏,基准分辨率 432×640 下的真实竖屏比例)。
+分辨率默认 432x700(竖屏)。⚠️ --write-movie 按**基准分辨率**渲染,
+不走 expand 拉伸那套数学 —— --resolution 只影响窗口、不改帧尺寸,帧固定 432×700。
 要桌面比例:SHOT_RES=1280x800 python3 tools/take_screenshots.py
 
 ⚠️ 这个脚本跑的是**桌面** Godot。桌面有系统字体回退,Web 导出没有 ——
@@ -1286,8 +1294,8 @@ git add tools/take_screenshots.py docs/screenshots/
 git commit -m "$(cat <<'EOF'
 docs: 文档截图改成手机竖屏比例
 
-take_screenshots.py 的分辨率改成从 SHOT_RES 取,默认 432x866(竖屏)。
-要桌面比例:SHOT_RES=1280x800。
+take_screenshots.py 的分辨率改成从 SHOT_RES 取,默认 432x700(竖屏)。
+⚠️ --write-movie 按基准分辨率渲染,--resolution 改不了帧尺寸,帧固定 432×700。
 
 四张截图重新生成 —— 布局已经是单列了,旧的两栏截图对不上代码。
 
@@ -1308,7 +1316,7 @@ EOF
 
 在 spec 里改这三处(内容见本计划开头的偏差表):
 
-1. §4 标题下的 `起步值 **400×640**` → `**432×640**`,并把表格里的「内容列实际宽度」按 432 重算;补一句 `432 = 16 边距 ×2 + 400 内容列,竖屏时逻辑视口恒为 432 宽`。
+1. §4 标题下的 `起步值 **400×640**` → `**432×700**`(高度 640 → 700 见偏差表),并把表格里的「内容列实际宽度」按 432 重算;补一句 `432 = 16 边距 ×2 + 400 内容列,竖屏时逻辑视口恒为 432 宽`。
 2. §5.2 的 `分段切换用 **TabContainer**` 那一条 → 改成三个 toggle `Button` + `ButtonGroup`,理由是 `TabContainer` 的页签高度由主题 StyleBox 内边距决定,做不到 44pt。图注 `← TabContainer 的页签` → `← 三个 toggle Button`。
 3. §6 整节 → 保留标题,内容改成「**不做**」并写明理由:实测现有 `custom_minimum_size` 已经全是 44–56 逻辑像素,基准分辨率一改就全部达标;Theme 没有 min-height 属性,要靠 StyleBox 内边距实现,等于重写一套外观。
 
@@ -1372,7 +1380,7 @@ git add docs/superpowers/specs/2026-08-27-mobile-portrait-design.md \
 git commit -m "$(cat <<'EOF'
 docs: spec 同步实现期的三处偏差 + 契约记一句手机档位
 
-1. 基准 400×640 → 432×640(= 16 边距 ×2 + 400 内容列,算术正好对上)
+1. 基准 400×640 → 432×700(宽 432 = 16 边距 ×2 + 400 内容列;高 700 见偏差表)
 2. 分段切换用三个 toggle Button 而不是 TabContainer —— TabContainer 的
    页签高度由主题 StyleBox 内边距决定,做不到 44pt
 3. §6「触控尺寸收进主题」不做:实测现有 custom_minimum_size 已经全是
