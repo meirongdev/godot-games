@@ -22,7 +22,7 @@ func _ready() -> void:
 func _login() -> void:
 	var s: Control = load("res://src/lobby/Login.tscn").instantiate()
 	add_child(s)
-	s.get_node("Center/Box/NameEdit").text = "爸爸"
+	s.get_node("Margin/Row/Col/NameEdit").text = "爸爸"
 
 
 func _me() -> String:

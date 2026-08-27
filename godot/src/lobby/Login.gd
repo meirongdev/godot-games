@@ -2,9 +2,9 @@ extends Control
 
 const NAME_KEY := "user://display_name.cfg"
 
-@onready var name_edit: LineEdit = $Center/Box/NameEdit
-@onready var enter_button: Button = $Center/Box/EnterButton
-@onready var status: Label = $Center/Box/Status
+@onready var name_edit: LineEdit = $Margin/Row/Col/NameEdit
+@onready var enter_button: Button = $Margin/Row/Col/EnterButton
+@onready var status: Label = $Margin/Row/Col/Status
 
 
 func _ready() -> void:

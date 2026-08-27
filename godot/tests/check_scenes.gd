@@ -16,7 +16,8 @@ extends SceneTree
 
 const CHECKS := {
 	"res://src/lobby/Login.tscn": [
-		"Center/Box/NameEdit", "Center/Box/EnterButton", "Center/Box/Status",
+		"Margin/Row/Col/NameEdit", "Margin/Row/Col/EnterButton",
+		"Margin/Row/Col/Status",
 	],
 	"res://src/lobby/Lobby.tscn": [
 		"HBox/Left/OnlineList", "HBox/Left/ChatLog", "HBox/Left/ChatEdit",
