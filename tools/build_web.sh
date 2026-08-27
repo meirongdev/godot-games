@@ -54,6 +54,19 @@ if grep -qa 'nakama.cfg' build/web/index.pck; then
 	exit 1
 fi
 
+# Nakama SDK 是 vendor 进来的,而 Web 版必须带一处本地修改:关掉 HTTPRequest
+# 的 accept_gzip。少了它,浏览器已经解过一次 gzip、Godot 再解一次必然失败
+# (result=8 RESULT_BODY_DECOMPRESS_FAILED),表现是「服务端 200、客户端拿不到
+# 响应」,登录永远卡在「连接中…」—— 2026-08-27 上线时就是这个。
+# 重新从 nakama-godot master 拷 addons/ 会把这行冲掉,而桌面版和 Python e2e
+# 全都测不出来,所以只能在这里挡。
+if ! grep -q 'accept_gzip = false' \
+     godot/addons/com.heroiclabs.nakama/client/NakamaHTTPAdapter.gd; then
+	echo "✗ Nakama SDK 少了 accept_gzip=false 的本地修改 —— Web 版一登录就会卡死" >&2
+	echo "  见 docs/nakama-godot-guide.md「本地改动」,重新打上再构建" >&2
+	exit 1
+fi
+
 # 汉字字体必须真的在包里。check_fonts.gd 验的是主题配置,这条验的是导出结果 ——
 # 万一将来有人给 export_presets 加了把 ui/ 排掉的 filter,这里会拦住。
 if ! grep -qa 'NotoSansSC' build/web/index.pck; then

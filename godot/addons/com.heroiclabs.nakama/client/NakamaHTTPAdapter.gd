@@ -156,6 +156,24 @@ func send_async(p_method : String, p_uri : String, p_headers : Dictionary, p_bod
 	req.timeout = timeout
 	if use_threads and OS.get_name() != 'Web':
 		req.use_threads = true # Threads not available nor needed on the web.
+	if OS.get_name() == 'Web':
+		# ⚠️ 对上游 SDK 的本地修改。重新从 nakama-godot master 拷贝 addons/ 之后
+		# 必须重新打上,否则 Web 版一登录就废。见 docs/nakama-godot-guide.md「本地改动」。
+		#
+		# Web 上 HTTP 实际走浏览器的 fetch,响应体**已经被浏览器解过 gzip**,
+		# 但 Chrome 仍在 Response.headers 里保留 Content-Encoding: gzip。
+		# HTTPRequest.accept_gzip 默认 true,看见这个头就再解一次 —— 解一段没压缩
+		# 的字节必然失败:
+		#     stream_peer_gzip.cpp: Condition "err != 0 && err != 1" is true
+		#     → result=8 (RESULT_BODY_DECOMPRESS_FAILED),body 长度 0,而 code 是 200
+		# 表现就是「服务端 200、客户端拿不到响应」,登录永远卡在「连接中…」。
+		# Nakama 默认对 /v2/* 开 gzip,所以每一个请求都踩。
+		#
+		# 桌面版自己收发 HTTP,拿到的是真·gzip 字节,解得开 —— 这就是为什么
+		# 桌面跑测、Python e2e 全绿,只有 Web 版炸。
+		#
+		# 关掉只是让 Godot 别重复解压;压缩仍由浏览器与服务器协商,不损失带宽。
+		req.accept_gzip = false
 
 	# Parse method
 	var method = HTTPClient.METHOD_GET

@@ -11,6 +11,9 @@ signal room_left
 
 const LOBBY_ROOM := "lobby"
 
+## 单个 HTTP 请求的超时(秒)。家里人用手机连,3 秒(SDK 默认)太紧。
+const REQUEST_TIMEOUT_SEC := 10
+
 var error_message := ""
 
 var _client: NakamaClient
@@ -31,8 +34,11 @@ func _ready() -> void:
 		error_message = cfg.error
 		push_error("[config] %s" % cfg.error)
 		return
-	_client = Nakama.create_client(cfg.server_key, cfg.host, cfg.port, cfg.scheme)
-	_client.timeout = 10
+	# ⚠️ 超时必须在**构造时**传进去。上游 SDK 里 NakamaClient.timeout 是个普通字段,
+	# 事后 `_client.timeout = 10` 只改了那个字段,不会传到 HTTP 适配器 ——
+	# 日志里会照旧打 `Timeout: 3`(适配器默认值),排查时非常误导。
+	_client = Nakama.create_client(
+		cfg.server_key, cfg.host, cfg.port, cfg.scheme, REQUEST_TIMEOUT_SEC)
 	_client.auto_refresh = true
 	print("[config] %s://%s:%d" % [cfg.scheme, cfg.host, cfg.port])
 

@@ -152,6 +152,41 @@ cp -r nakama-godot/addons/com.heroiclabs.nakama \
 
 > `addons/com.heroiclabs.nakama/Satori/` 是 Heroic Labs 的 LiveOps 商业产品(A/B 测试、远程配置),自建 homelab 用不到,可以整个删掉减小体积。
 
+### 3.1 本地改动(重新拷 addon 后必须重新打上)
+
+vendor 进来的 SDK 有**一处**本地修改。它不是优化,是 Web 版能不能用的开关 ——
+重新从 master 拷 `addons/` 会把它冲掉,而桌面运行和 Python e2e 都测不出来。
+
+| 文件 | 改动 | 为什么 |
+|---|---|---|
+| `client/NakamaHTTPAdapter.gd` · `send_async()` | Web 平台上 `req.accept_gzip = false` | 见下 |
+
+Web 上 Godot 的 `HTTPRequest` 底层走浏览器的 `fetch`,响应体**已经被浏览器解过
+gzip**,但 Chrome 仍然在 `Response.headers` 里保留 `Content-Encoding: gzip`。
+`accept_gzip` 默认 `true`,Godot 看见这个头就再解一次 —— 解一段没压缩的字节,
+必然失败:
+
+```
+ERROR: Condition "err != 0 && err != 1" is true. Returning: FAILED
+   at: _process (core/io/stream_peer_gzip.cpp:117)
+=== Nakama : DEBUG === Request 1 failed with result: 8, response code: 200
+```
+
+`result=8` 是 `RESULT_BODY_DECOMPRESS_FAILED`,body 长度 0,而 **response code 是
+200** —— 服务端明明成功了,客户端就是拿不到响应,登录永远卡在「连接中…」。
+Nakama 默认对 `/v2/*` 开 gzip,所以每一个请求都踩。
+
+桌面版自己收发 HTTP,拿到的是真 gzip 字节,解得开;`tools/e2e_match.py` 根本
+不经过 Godot。**只有 Web 版会炸**,这就是 2026-08-27 上线时两层测试全绿、
+页面一开就废的原因。
+
+关掉只是让 Godot 别重复解压,压缩仍由浏览器与服务器协商,不损失带宽。
+
+两道门禁盯着它,不靠人记:
+
+- `tools/build_web.sh` 构建前 grep 这一行,没有就拒绝出包;
+- `tools/web_smoke.py` 在真浏览器里把制品跑进大厅,是最后一道。
+
 ---
 
 ## 4. Step 3 — 配置不要写死
