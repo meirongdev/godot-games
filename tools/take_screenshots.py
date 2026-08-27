@@ -3,6 +3,11 @@
 
 前置: cd nakama && docker compose up -d(harness 要真实登录拿 user_id)
 
+分辨率默认竖屏。要桌面比例:SHOT_RES=1280x800 python3 tools/take_screenshots.py
+⚠️ --write-movie 是按**基准分辨率**渲染的(project.godot 里的 432×700),
+   不走 expand 拉伸那套数学 —— 所以 --resolution 只影响窗口、不改帧尺寸。
+   实测帧就是 432×700,别指望靠 SHOT_RES 调出别的画幅。
+
 ⚠️ 这个脚本跑的是**桌面** Godot。桌面有系统字体回退,Web 导出没有 ——
    所以截图看起来正常 ≠ Web 版正常。字体问题只有 tests/check_fonts.gd
    和真开一次网页能抓到(2026-08-27 就是这么漏掉整套中文字体的)。
@@ -14,6 +19,7 @@ import io, re, os, shutil, subprocess, sys
 GODOT = "/Applications/Godot.app/Contents/MacOS/Godot"
 PROJ = "godot/project.godot"
 OUT = "docs/screenshots"
+RES = os.environ.get("SHOT_RES", "432x700")
 SHOTS = ["login", "lobby", "room", "rps"]
 FRAMES = {"login": 40, "lobby": 160, "room": 80, "rps": 80}
 
@@ -29,7 +35,7 @@ try:
         env = dict(os.environ, SHOT=shot)
         subprocess.run(
             [GODOT, "--path", "godot", "--write-movie", tmp + "/f.png",
-             "--quit-after", str(FRAMES[shot]), "--resolution", "1280x800"],
+             "--quit-after", str(FRAMES[shot]), "--resolution", RES],
             env=env, capture_output=True, timeout=180)
         pngs = sorted(f for f in os.listdir(tmp) if f.endswith(".png"))
         if not pngs:
