@@ -165,11 +165,21 @@ async def run(url, shot_path, name, win=None):
                 await page.send("Emulation.setDeviceMetricsOverride", {
                     "width": win[0], "height": win[1],
                     "deviceScaleFactor": 3, "mobile": True})
-                # 特意不开 Emulation.setTouchEmulationEnabled:实测(A/B/C/D/E 五组
-                # 对照)一开它,Chrome headless 就吞掉 CDP 合成的键盘事件,name 打
-                # 不进去、Enter 也没反应,登录卡死在 [layout] 那行之后——跟视口
-                # 尺寸无关(单独开它、不带 metrics override 照样卡)。手机视口的
-                # 模拟只靠 setDeviceMetricsOverride 就够,不需要它。
+                # 特意不开 Emulation.setTouchEmulationEnabled。实测(A/B/C/D/E 五组
+                # 对照)一开它,name 就打不进去、Enter 也没反应,登录卡死在 [layout]
+                # 之后 —— 跟视口尺寸无关(单独开它、不带 metrics override 照样卡)。
+                #
+                # 机制不是「Chrome 吞事件」,是**焦点换了地方**:
+                # export_presets.cfg 里 html/experimental_virtual_keyboard=true,
+                # 而 Godot Web 的 FEATURE_VIRTUAL_KEYBOARD 是按运行时触屏探测
+                # ('ontouchstart' in window)开关的 —— setTouchEmulationEnabled
+                # 正好把它打开(setDeviceMetricsOverride{mobile:true} 不会)。
+                # LineEdit.virtual_keyboard_enabled 默认 true,于是 grab_focus()
+                # 时 Godot 会新建并聚焦一个贴在 canvas 旁边的隐藏 DOM <input>
+                # 来接软键盘输入,打在 canvas 上的键事件自然进不去。
+                #
+                # ⚠️ 推论:**真机上的文字输入走的就是这条 DOM 覆盖层路径,
+                # 这个测试完全没覆盖到。** 软键盘相关的行为只能真机验。
 
             await page.send("Page.navigate", {"url": f"{url}/?player={name}"})
             await asyncio.sleep(10)          # 38 MB wasm,给足加载时间
@@ -187,6 +197,12 @@ async def run(url, shot_path, name, win=None):
             return page.logs
     finally:
         chrome.kill()
+        # 两个档位顺序跑、共用固定的调试端口,kill 之后要真的等它退出,
+        # 否则下一个档位可能绑不上 9333,报一个完全看不懂的错。
+        try:
+            chrome.wait(timeout=5)
+        except Exception:
+            pass
         shutil.rmtree(profile, ignore_errors=True)
 
 
@@ -247,8 +263,9 @@ def main():
     failed = []
     try:
         for tier in TIERS:
-            shot = os.path.join(tempfile.gettempdir(),
-                                "web_smoke_%s.png" % ("mobile" if tier["win"] else "desktop"))
+            shot = os.path.join(
+                tempfile.gettempdir(),
+                f"web_smoke_{'mobile' if tier['win'] else 'desktop'}.png")
             name = NAME_BASE + tier["tag"]
             print(f"\n=== {tier['name']} ===")
             logs = asyncio.run(run(url, shot, name, tier["win"]))

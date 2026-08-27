@@ -9,8 +9,12 @@ const NAME_KEY := "user://display_name.cfg"
 
 func _ready() -> void:
 	enter_button.pressed.connect(_on_enter_pressed)
-	# 手机上软键盘的「完成/换行」键要能直接进去,不用去够按钮。
-	# 顺带让 tools/web_smoke.py 不再需要按钮的像素坐标。
+	# 回车/软键盘「完成」键也能提交。⚠️ 真机上这条路**可能根本不通**:
+	# 开了 html/experimental_virtual_keyboard 之后,Godot 的 LineEdit 在
+	# 触屏设备上把输入交给一个隐藏的 DOM <input>,而 Enter 触发不了
+	# text_submitted(上游 issue godotengine/godot#76215,3.5.1~4.x 都有)。
+	# 所以「进入大厅」按钮才是可靠路径,这里只是顺手;
+	# tools/web_smoke.py 靠它免掉像素坐标(那边不开触屏模拟,所以走得通)。
 	name_edit.text_submitted.connect(func(_text: String): _on_enter_pressed())
 	name_edit.text = _load_name()
 	# 打开就能打字。手机上这会顺带唤起软键盘 —— 第一屏就是让你输名字,合理。
