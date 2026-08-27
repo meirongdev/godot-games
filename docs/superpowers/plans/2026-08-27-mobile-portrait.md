@@ -525,10 +525,16 @@ feat(ui): 登录页改成 Margin→Row→Col 单列,字号收到新坐标系
 标题 46 → 30,输入框/按钮最小高 56 → 48/52:基准从 1280 变 432 之后
 坐标系小了 3 倍,原来的字号会占掉整屏。
 
+顺带修掉一个现存问题:原来 Center/Box 的 custom_minimum_size 是 440,
+比 432 宽的逻辑视口还宽,手机上边缘会被切掉一点。
+
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
+
+> 最后那段是执行期补的:Task 3 的 code review 发现 `Center/Box` 的 440 已经
+> 超过 432 的逻辑视口,正好被这一步的整份替换顺手修掉,值得记在 commit 里。
 
 ---
 
