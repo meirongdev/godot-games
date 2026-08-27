@@ -27,6 +27,9 @@ func _ready() -> void:
 	start_button.pressed.connect(func(): ServerConnection.send(OpCodes.START))
 	start_button.disabled = true
 	status.text = "等待其他人…"
+	# 进房那一刻的 ROOM_STATE 是在本场景被切出来之前广播的,那时还没订阅 ——
+	# 补发一次。不补的话房名、花名册、人数会一直空着,直到下一次 sync。
+	ServerConnection.replay_room_state()
 
 
 func _on_room_event(op_code: int, payload: Dictionary) -> void:

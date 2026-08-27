@@ -24,6 +24,8 @@ var _match_id := ""
 var _lobby_users := {}   # user_id -> username
 var _config: NakamaConfig
 var _reconnecting := false
+## 进房那一刻服务端广播的 ROOM_STATE。见 replay_room_state()。
+var _last_room_state := {}
 
 
 func _ready() -> void:
@@ -267,6 +269,9 @@ func _rpc_error(payload: Dictionary) -> String:
 func join_room_async(match_id: String) -> int:
 	if await ensure_socket_async() != OK:
 		return ERR_CANT_CONNECT
+	# 上一个房间的状态不能漏到下一个房间去。清在 join 之前:
+	# 服务端的 ROOM_STATE 是在下面这个 await 期间到的,清晚了会把它抹掉。
+	_last_room_state = {}
 	var m = await _socket.join_match_async(match_id)
 	var err := _check(m)
 	if err != OK:
@@ -280,6 +285,7 @@ func leave_room_async() -> void:
 	if not _match_id.is_empty():
 		await _socket.leave_match_async(_match_id)
 		_match_id = ""
+		_last_room_state = {}
 		room_left.emit()
 
 
@@ -293,7 +299,27 @@ func send(op_code: int, data: Dictionary = {}) -> void:
 
 func _on_match_state(state: NakamaRTAPI.MatchData) -> void:
 	var payload = JSON.parse_string(state.data)
-	room_event.emit(state.op_code, payload if payload is Dictionary else {})
+	var data: Dictionary = payload if payload is Dictionary else {}
+	if state.op_code == OpCodes.ROOM_STATE:
+		_last_room_state = data
+	room_event.emit(state.op_code, data)
+
+
+## 补发进房那一刻错过的 ROOM_STATE。房间场景在 _ready() 里订阅完 room_event
+## 之后调用。
+##
+## ⚠️ 为什么需要它:服务端在 match_join 里就广播了第一条 ROOM_STATE,而那一刻
+## 房间场景**还没被切出来** —— join_room_async 要先 return,大厅才
+## change_scene_to_file,RoomController._ready() 才订阅 room_event。
+## 所以第一条状态是发给「没有听众的信号」,直接丢掉:房名显示写死的「房间」、
+## 花名册空着、状态卡在「等待其他人…」,一直到有人进来或有人点准备触发
+## 下一次 sync 才恢复。自己一个人建的房就一直是空的。
+##
+## 补发是安全的:如果那条状态到得比 _ready() 晚,场景已经订阅上了会正常收到,
+## 这里的缓存还是空的,什么都不做。两种时序都对。
+func replay_room_state() -> void:
+	if not _last_room_state.is_empty():
+		room_event.emit(OpCodes.ROOM_STATE, _last_room_state)
 
 
 # ---------------------------------------------------------------- 错误处理
