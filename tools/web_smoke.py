@@ -90,6 +90,8 @@ class Page:
 
     _shots = {}
 
+    # 登录流程已经不用坐标了,但点按钮这个原语留着 —— 大厅/房间的交互
+    # (建房、准备、开局)只能靠点,扩冒烟测试的人需要它。
     async def click(self, x, y):
         for t, buttons in (("mousePressed", 1), ("mouseReleased", 0)):
             await self.send("Input.dispatchMouseEvent", {

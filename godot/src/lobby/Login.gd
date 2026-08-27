@@ -32,6 +32,14 @@ func _ready() -> void:
 
 
 func _on_enter_pressed() -> void:
+	# ⚠️ 两个入口都会走到这里:按钮和名字框的回车。按钮按下后会 disabled,
+	# 但名字框不会 —— 连点两次回车就会并发跑两遍登录(两次设备认证抢着写
+	# _session、两次 connect_to_server_async 撞在 `if _socket == null` 上
+	# 各建一个 socket、change_scene_to_file 还可能触发两次)。
+	# 复用按钮的 disabled 当锁:它同时也挡住了「配置坏了」那种情况 ——
+	# 那时按钮一进门就是 disabled,回车本来能绕过去。
+	if enter_button.disabled:
+		return
 	var display_name := name_edit.text.strip_edges()
 	if display_name.is_empty():
 		status.text = "先起个名字"
