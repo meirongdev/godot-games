@@ -6,13 +6,13 @@ const GAME_SCENES := {
 	"rps": "res://src/games/rps/RpsGame.tscn",
 }
 
-@onready var room_title: Label = $VBox/Header/RoomTitle
-@onready var leave_button: Button = $VBox/Header/LeaveButton
-@onready var player_list: ItemList = $VBox/Body/PlayerPanel/PlayerList
-@onready var ready_button: CheckButton = $VBox/Body/PlayerPanel/ReadyButton
-@onready var start_button: Button = $VBox/Body/PlayerPanel/StartButton
-@onready var game_slot: Control = $VBox/Body/GameSlot
-@onready var status: Label = $VBox/Status
+@onready var room_title: Label = $Margin/Row/Col/Header/RoomTitle
+@onready var leave_button: Button = $Margin/Row/Col/Header/LeaveButton
+@onready var player_strip: Label = $Margin/Row/Col/PlayerStrip
+@onready var ready_button: CheckButton = $Margin/Row/Col/Actions/ReadyButton
+@onready var start_button: Button = $Margin/Row/Col/Actions/StartButton
+@onready var game_slot: Control = $Margin/Row/Col/GameSlot
+@onready var status: Label = $Margin/Row/Col/Status
 
 var _game: GameBase = null
 var _players: Array = []
@@ -56,15 +56,19 @@ func _apply_room_state(payload: Dictionary) -> void:
 	room_title.text = "%s · %s" % [room_name, OpCodes.GAME_LABELS.get(game_id, game_id)]
 
 	var me := ServerConnection.get_user_id()
-	player_list.clear()
+	# 竖屏里竖直空间全给游戏区,名单压成一行(最多 8 人,一两行写完)。
+	# 房主的 👑 放在名字前面 —— 后面跟着 ✓,放后面会挤成一团认不出。
+	var parts := PackedStringArray()
 	for p in _players:
 		var line: String = p["name"]
+		if p["id"] == _host:
+			line = "👑" + line
 		if p["id"] == me:
 			line += "(我)"
-		if p["id"] == _host:
-			line += "  👑"
-		line += "  ✓ 已准备" if p["ready"] else "  …"
-		player_list.add_item(line)
+		if p["ready"]:
+			line += " ✓"
+		parts.append(line)
+	player_strip.text = "   ".join(parts)
 
 	var is_host := ServerConnection.get_user_id() == _host
 	start_button.visible = is_host

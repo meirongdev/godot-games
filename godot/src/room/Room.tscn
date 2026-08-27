@@ -9,69 +9,74 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_room")
 
-[node name="VBox" type="VBoxContainer" parent="."]
+[node name="Margin" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
-theme_override_constants/separation = 12
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
-[node name="Header" type="HBoxContainer" parent="VBox"]
-custom_minimum_size = Vector2(0, 48)
+[node name="Row" type="HBoxContainer" parent="Margin"]
 layout_mode = 2
+alignment = 1
 
-[node name="RoomTitle" type="Label" parent="VBox/Header"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-theme_override_font_sizes/font_size = 28
-text = "房间"
-
-[node name="LeaveButton" type="Button" parent="VBox/Header"]
-custom_minimum_size = Vector2(110, 44)
-layout_mode = 2
-size_flags_vertical = 4
-text = "离开"
-
-[node name="Body" type="HBoxContainer" parent="VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_constants/separation = 20
-
-[node name="PlayerPanel" type="VBoxContainer" parent="VBox/Body"]
-custom_minimum_size = Vector2(300, 0)
+[node name="Col" type="VBoxContainer" parent="Margin/Row"]
+custom_minimum_size = Vector2(400, 0)
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="PlayerList" type="ItemList" parent="VBox/Body/PlayerPanel"]
+[node name="Header" type="HBoxContainer" parent="Margin/Row/Col"]
 layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 22
+theme_override_constants/separation = 8
 
-[node name="ReadyButton" type="CheckButton" parent="VBox/Body/PlayerPanel"]
-custom_minimum_size = Vector2(0, 52)
+[node name="RoomTitle" type="Label" parent="Margin/Row/Col/Header"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 22
-text = "准备"
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 20
+text = "房间"
+autowrap_mode = 3
 
-[node name="StartButton" type="Button" parent="VBox/Body/PlayerPanel"]
-custom_minimum_size = Vector2(0, 56)
+[node name="LeaveButton" type="Button" parent="Margin/Row/Col/Header"]
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "开始游戏"
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 18
+text = "离开"
 
-[node name="GameSlot" type="Control" parent="VBox/Body"]
+[node name="PlayerStrip" type="Label" parent="Margin/Row/Col"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+autowrap_mode = 3
+
+[node name="GameSlot" type="Control" parent="Margin/Row/Col"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Status" type="Label" parent="VBox"]
-custom_minimum_size = Vector2(0, 32)
+[node name="Actions" type="HBoxContainer" parent="Margin/Row/Col"]
 layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ReadyButton" type="CheckButton" parent="Margin/Row/Col/Actions"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+text = "准备"
+
+[node name="StartButton" type="Button" parent="Margin/Row/Col/Actions"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 22
+text = "开始游戏"
+
+[node name="Status" type="Label" parent="Margin/Row/Col"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
 horizontal_alignment = 1
-autowrap_mode = 2
+autowrap_mode = 3

@@ -29,9 +29,10 @@ const CHECKS := {
 		"Margin/Row/Col/CreateBox/CreateButton", "Margin/Row/Col/Status",
 	],
 	"res://src/room/Room.tscn": [
-		"VBox/Header/RoomTitle", "VBox/Header/LeaveButton",
-		"VBox/Body/PlayerPanel/PlayerList", "VBox/Body/PlayerPanel/ReadyButton",
-		"VBox/Body/PlayerPanel/StartButton", "VBox/Body/GameSlot", "VBox/Status",
+		"Margin/Row/Col/Header/RoomTitle", "Margin/Row/Col/Header/LeaveButton",
+		"Margin/Row/Col/PlayerStrip", "Margin/Row/Col/Actions/ReadyButton",
+		"Margin/Row/Col/Actions/StartButton", "Margin/Row/Col/GameSlot",
+		"Margin/Row/Col/Status",
 	],
 	"res://src/games/rps/RpsGame.tscn": [
 		"VBox/RoundLabel", "VBox/Countdown", "VBox/Hands",
