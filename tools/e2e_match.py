@@ -24,7 +24,14 @@ READY, START, ROOM_STATE, GAME_STARTED, GAME_OVER = 1, 2, 10, 11, 12
 THROW, ROUND_BEGIN, ROUND_RESULT = 20, 30, 31
 
 
+# Cloudflare 的 WAF 按 User-Agent 拦 urllib 的默认值(Python-urllib/3.x),直接 403,
+# 而同样的请求用 curl 或浏览器的 UA 就是 200。本地打 compose 无所谓,打线上
+# (NAKAMA_HOST=game.meirong.dev NAKAMA_TLS=1)不带这个头就根本跑不起来。
+UA = "godot-games-e2e/1.0"
+
+
 def _post(url, body, headers):
+    headers = dict(headers, **{"User-Agent": UA})
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
     return json.load(urllib.request.urlopen(req))
 
@@ -56,7 +63,8 @@ class Client:
     async def connect(self, match_id):
         self.match_id = match_id
         self.ws = await websockets.connect(
-            f"{WS_SCHEME}://{HOST}:{PORT}/ws?lang=en&status=true&format=json&token={self.token}")
+            f"{WS_SCHEME}://{HOST}:{PORT}/ws?lang=en&status=true&format=json&token={self.token}",
+            user_agent_header=UA)   # 同上:websockets 的默认 UA 一样会被 WAF 拦
         asyncio.create_task(self._pump())
 
     async def _pump(self):
