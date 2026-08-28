@@ -16,6 +16,13 @@ HTTP 栈。2026-08-27 上线卡死就是这么漏的:Godot 的 HTTPRequest 在 W
 契约 §4.2.1 原本写的是「必须单独做一次:真的开一次页面」—— 手动步骤。
 这个脚本就是把那一步变成门禁。
 
+**为什么要点别人的房间、还要退出来再建一个:**
+「建房进房间」和「点房间列表进房间」是两条完全不同的路径 —— 前者点的是 Button,
+后者点的是 ItemList 的一行,而 2026-08-28 那个 bug 正好只在后者上现形。所以
+冒烟测试先用另一个玩家(Python 客户端,不走 Godot)建一个房,浏览器**从列表里
+点进去**,再点「退出」回大厅,最后才自己建房 —— 顺带盖住「退出房间后回大厅」
+这条路。
+
 **为什么要一路点到房间里:**
 2026-08-27 上线后手机端报「进不了房间」,根因是进房那一刻服务端广播的
 ROOM_STATE 被客户端丢掉(见 ServerConnection.join_room_async 的注释),
@@ -23,6 +30,14 @@ ROOM_STATE 被客户端丢掉(见 ServerConnection.join_room_async 的注释),
 这个 bug 躲过了全部 7 层测试:Lua 单测只管服务端;e2e_match.py 用的是
 自己写的 Python 客户端,根本不跑 ServerConnection;而这个脚本当时停在大厅。
 所以门禁必须往前推一步:真的进到房间里,并断言房间页拿到了状态。
+
+**为什么手机档位必须用真的 touch 事件:**
+2026-08-28 上线后手机端报「双击进不了房间」。原因是 ItemList 的 item_activated
+只在事件带「双击」标记时才发,而 Godot Web 的触屏回调根本不传这个标记
+(见 Lobby.gd 里 item_clicked 那段注释)。这个脚本当时用 Input.dispatchMouseEvent
+点按钮 —— 鼠标的双击是引擎按时间差自己算的,永远是好的 —— 于是**手机档位在用
+鼠标测手机**,这类「只有手指点不动」的 bug 一条都看不见。现在手机档位一律发
+Input.dispatchTouchEvent。
 
 ⚠️ 标签页必须是**可见**的。Chrome 对隐藏标签不跑 requestAnimationFrame,
 而 Godot 的主循环就挂在 rAF 上 —— 标签一隐藏,引擎直接不转,任何等待都会
@@ -44,6 +59,10 @@ import urllib.request
 
 import websockets
 
+# 「另一个玩家」直接复用 e2e_match 里的设备认证和 RPC —— 它不经过 Godot,
+# 起一个房间只要两个 HTTP 请求,比再开一个浏览器便宜得多。
+import e2e_match
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 9333
 
@@ -54,9 +73,11 @@ NAME_BASE = "smoke" + str(int(time.time()))[-5:]
 # 两个档位都要过。手机档位是这次的重点,桌面档位防回归。
 # dsf = deviceScaleFactor。逻辑坐标换 CSS 像素时要用(CDP 的输入坐标是 CSS 像素,
 # 而客户端 [layout] 打的窗口尺寸是物理像素)。桌面档位不覆写 metrics,所以是 1。
+# pointer:桌面发鼠标事件,手机发**真的触屏事件**。这一栏不是形式主义 ——
+# 用鼠标点手机档位,等于没测手机(见上面的说明)。
 TIERS = [
-    {"name": "桌面", "win": None, "tag": "d", "dsf": 1},
-    {"name": "手机竖屏", "win": (390, 844), "tag": "m", "dsf": 3},
+    {"name": "桌面", "win": None, "tag": "d", "dsf": 1, "pointer": "mouse"},
+    {"name": "手机竖屏", "win": (390, 844), "tag": "m", "dsf": 3, "pointer": "touch"},
 ]
 
 # 逻辑视口宽度的上限(手机档位)。基准分辨率不对时这里会是 1280,
@@ -89,21 +110,57 @@ def assert_port_free():
                 f"  先清掉再跑:lsof -ti tcp:{PORT} | xargs -r kill -9")
 
 
-def create_button_css(logs, dsf):
-    """从客户端自己打的 [layout] 日志里算出「建房」按钮的 CSS 坐标。
+def _css_per_logical(logs, dsf):
+    """逻辑坐标 → CSS 像素的换算系数。CDP 的输入坐标是 CSS 像素,
+    而客户端 [layout] 打的窗口尺寸是物理像素,所以要除一次 dsf。"""
+    m = re.search(r"窗口 (\d+)x(\d+) → 逻辑视口 (\d+)x(\d+)", "\n".join(logs))
+    return None if m is None else (int(m.group(1)) / dsf) / int(m.group(3))
 
-    刻意不按 .tscn 反算布局:那种算法每改一次布局就悄悄失准,而 Lobby.gd
-    会把按钮的实际矩形打出来(逻辑坐标),这里只做一次单位换算。
+
+def rect_css(logs, dsf, pattern):
+    """从客户端自己打的 [layout] 日志里算出某个控件中心的 CSS 坐标。
+
+    刻意不按 .tscn 反算布局:那种算法每改一次布局就悄悄失准,而客户端会把
+    控件的实际矩形打出来(逻辑坐标),这里只做一次单位换算。
     """
-    blob = "\n".join(logs)
-    view = re.search(r"窗口 (\d+)x(\d+) → 逻辑视口 (\d+)x(\d+)", blob)
-    btn = re.search(r"建房按钮 (\d+),(\d+) (\d+)x(\d+)", blob)
-    if not (view and btn):
+    k = _css_per_logical(logs, dsf)
+    m = re.search(pattern, "\n".join(logs))
+    if k is None or m is None:
         return None
-    win_w, logical_w = int(view.group(1)), int(view.group(3))
-    css_per_logical = (win_w / dsf) / logical_w
-    x, y, w, h = (int(g) for g in btn.groups())
-    return ((x + w / 2) * css_per_logical, (y + h / 2) * css_per_logical)
+    x, y, w, h = (int(g) for g in m.groups())
+    return ((x + w / 2) * k, (y + h / 2) * k)
+
+
+def room_row_css(logs, dsf, want):
+    """房间列表里房名含 want 的那一行的 CSS 坐标。
+
+    ⚠️ 必须按房名挑,不能按行号。列表里混着别人建的房、以及上几次冒烟跑完
+    还没被自动关闭的空房间 —— 第一行基本上不是自己要点的那个。
+    取**最后一次**刷新打的坐标:列表每 3 秒重排一次,早先那份可能已经过期。
+    """
+    k = _css_per_logical(logs, dsf)
+    if k is None:
+        return None
+    hit = None
+    for m in re.finditer(r"房间行 \d+ (\d+),(\d+) (\d+)x(\d+) (.*)", "\n".join(logs)):
+        if want in m.group(5):
+            x, y, w, h = (int(g) for g in m.groups()[:4])
+            hit = ((x + w / 2) * k, (y + h / 2) * k)
+    return hit
+
+
+def guest_room(name):
+    """让「另一个玩家」建一个房,返回房名 —— 浏览器等下要从列表里点它。
+
+    刻意不再开一个浏览器:这一步只需要往房间列表里放一行可点的东西,
+    两个 HTTP 请求就够了(e2e_match 的设备认证 + create_room RPC),
+    而且顺带保证了这个房**不是这个客户端自己建的**。
+    ⚠️ 空房间 60 秒会被 room.lua 自动关掉,所以建完要马上点。
+    """
+    room = "别人的房" + name
+    tok, _uid = e2e_match.auth("web-smoke-guest-" + name)
+    e2e_match.rpc(tok, "create_room", {"game": "rps", "name": room})
+    return room
 
 
 def find_chrome():
@@ -143,6 +200,20 @@ class Page:
 
     _shots = {}
 
+    # 点一下。⚠️ kind 一定要跟档位走:手机档位发鼠标事件等于没测手机 ——
+    # 鼠标和触屏在引擎里是两条不同的路径,而「只有手指点不动」的 bug
+    # 只在触屏那条上现形(见模块文档)。
+    async def point(self, x, y, kind="mouse"):
+        await (self.tap(x, y) if kind == "touch" else self.click(x, y))
+
+    async def tap(self, x, y):
+        await self.send("Input.dispatchTouchEvent", {
+            "type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        await asyncio.sleep(0.05)
+        await self.send("Input.dispatchTouchEvent", {
+            "type": "touchEnd", "touchPoints": []})
+        await asyncio.sleep(0.05)
+
     # 登录流程已经不用坐标了,但点按钮这个原语留着 —— 大厅/房间的交互
     # (建房、准备、开局)只能靠点,扩冒烟测试的人需要它。
     async def click(self, x, y):
@@ -175,7 +246,7 @@ class Page:
         self._shots[mid] = path
 
 
-async def run(url, shot_path, name, win=None, dsf=1):
+async def run(url, shot_path, name, win=None, dsf=1, pointer="mouse"):
     assert_port_free()
     profile = tempfile.mkdtemp(prefix="web-smoke-")
     chrome = subprocess.Popen([
@@ -240,13 +311,45 @@ async def run(url, shot_path, name, win=None, dsf=1):
                 await page.shot(shot_path)
                 await asyncio.sleep(1)
 
-            # 继续点「建房」进房间。房名留空,服务端会起「<名字>的房间」,
+            # ---- ① 从房间列表点进**别人**的房间。
+            # 这一步和「点建房」不是一条路:那边点的是 Button,这边点的是
+            # ItemList 的一行,2026-08-28 的 bug 只在这边现形。
+            try:
+                guest = guest_room(name)
+            except Exception as e:
+                # Nakama 没起来这一步就会炸。别让它掀掉整轮 —— 后面的断言
+                # 会以「没进大厅」的形式一起报出来,比一个 traceback 好读。
+                guest = ""
+                page.logs.append(f"SMOKE 另一个玩家建不出房:{e}")
+            await asyncio.sleep(6)     # 等大厅那 3 秒一次的轮询把它捞进列表
+            # ⚠️ guest 为空时**不能**去找行:room_row_css 的匹配是子串,
+            # 空串命中每一行,会点到一个随机房间上去。
+            row = room_row_css(page.logs, dsf, guest) if guest else None
+            if row is None:
+                page.logs.append(f"SMOKE 房间列表里没有「{guest}」这一行")
+            else:
+                await page.point(*row, kind=pointer)
+                await asyncio.sleep(8)
+                if shot_path:
+                    await page.shot(shot_path.replace(".png", "_joined.png"))
+                    await asyncio.sleep(1)
+
+            # ---- ② 点「退出」回大厅。顺带盖住「退了还能不能再来一次」——
+            # 这条路上曾经有过 bug(见 create_room_async 的注释)。
+            back = rect_css(page.logs, dsf, r"退出按钮 (\d+),(\d+) (\d+)x(\d+)")
+            if back is None:
+                page.logs.append("SMOKE 没能定位退出按钮(压根没进到房间里?)")
+            else:
+                await page.point(*back, kind=pointer)
+                await asyncio.sleep(6)
+
+            # ---- ③ 自己建一个房。房名留空,服务端会起「<名字>的房间」,
             # check() 靠这个名字确认房间页拿到的是**这个**房间的状态。
-            target = create_button_css(page.logs, dsf)
+            target = rect_css(page.logs, dsf, r"建房按钮 (\d+),(\d+) (\d+)x(\d+)")
             if target is None:
                 page.logs.append("SMOKE 没能定位建房按钮(缺 [layout] 日志)")
             else:
-                await page.click(*target)
+                await page.point(*target, kind=pointer)
                 await asyncio.sleep(8)
                 if shot_path:
                     await page.shot(shot_path.replace(".png", "_room.png"))
@@ -305,18 +408,27 @@ def check(logs, name, mobile=False):
     # 房间页必须真的拿到进房那一刻的 ROOM_STATE。缺这条不是「没点到按钮」,
     # 更可能是那条状态又被丢了 —— 房间页会停在写死的「房间」+ 空花名册,
     # 用户看到的就是「进不了房间」。
-    room = re.search(r"\[room\] (.+?) · (\d+) 人 · phase=(\w+)", blob)
-    if not room:
-        problems.append("没看到 [room]:没进到房间里,或者进房的 ROOM_STATE 又被丢了")
-    else:
-        if name not in room.group(1):
-            problems.append(
-                f"房间名是「{room.group(1)}」,不含自己的名字 —— 房间页拿到的"
-                f"可能不是自己刚建的那个房间的状态")
-        if room.group(2) != "1":
-            problems.append(f"房间里显示 {room.group(2)} 人,应该是 1 人(花名册没拿到?)")
-        if room.group(3) != "waiting":
-            problems.append(f"房间 phase={room.group(3)},刚建的房应该是 waiting")
+    rooms = re.findall(r"\[room\] (.+?) · (\d+) 人 · phase=(\w+)", blob)
+    guest = "别人的房" + name
+    if not rooms:
+        problems.append("没看到 [room]:一个房间都没进去,"
+                        "或者进房的 ROOM_STATE 又被丢了")
+        return problems
+
+    # ① 第一个进的必须是从**列表里点进去**的那个别人的房间。
+    if guest not in rooms[0][0]:
+        problems.append(
+            f"第一个进的房间是「{rooms[0][0]}」,不是从列表里点进的「{guest}」"
+            f" —— 点房间行进不去了?(手机档位上这条最容易断,见模块文档)")
+    # ③ 最后停在自己建的房间里 —— 中间还夹着一次「退出回大厅」。
+    if name not in rooms[-1][0]:
+        problems.append(
+            f"最后停在「{rooms[-1][0]}」而不是自己建的房 ——"
+            f" 退出回大厅、或者回来之后再建房这一步断了")
+    if rooms[-1][1] != "1":
+        problems.append(f"自己建的房里显示 {rooms[-1][1]} 人,应该是 1 人(花名册没拿到?)")
+    if rooms[-1][2] != "waiting":
+        problems.append(f"自己建的房 phase={rooms[-1][2]},刚建的房应该是 waiting")
 
     return problems
 
@@ -342,9 +454,11 @@ def main():
                 f"web_smoke_{'mobile' if tier['win'] else 'desktop'}.png")
             name = NAME_BASE + tier["tag"]
             print(f"\n=== {tier['name']} ===")
-            logs = asyncio.run(run(url, shot, name, tier["win"], tier["dsf"]))
+            logs = asyncio.run(run(url, shot, name, tier["win"], tier["dsf"],
+                                   tier["pointer"]))
             problems = check(logs, name, mobile=bool(tier["win"]))
             print(f"  截图:{shot}")
+            print(f"        {shot.replace('.png', '_joined.png')}")
             print(f"        {shot.replace('.png', '_room.png')}")
             if problems:
                 failed.append(tier["name"])
@@ -363,7 +477,8 @@ def main():
     if failed:
         print("\n✗ Web 冒烟失败:" + "、".join(failed))
         return 1
-    print("\n✓ Web 冒烟通过:桌面 + 手机竖屏,登录 → 大厅 → 房间都走通")
+    print("\n✓ Web 冒烟通过:桌面(鼠标) + 手机竖屏(触屏),"
+          "登录 → 大厅 → 点进别人的房间 → 退出 → 自己建房 都走通")
     return 0
 
 

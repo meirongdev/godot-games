@@ -27,7 +27,7 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 | 5 场景截图 | 见下 | ~10s/景 | 布局灾难(缩成一团、区域被压成 0 高、控件隐形 —— 层 2/3 全都看不见) |
 | 6 桌面多开真玩 | `godot --path godot -- --device-suffix=a &`(b、c 同理) | 人肉 | 客户端运行时逻辑与手感 |
 | 7 Web 版(人肉) | `./tools/build_web.sh && python3 tools/serve_web.py` → `http://localhost:8080/?player=a` | ~1min | Web 特有问题(wasm、JS bridge、软键盘)+ **同源拓扑**:serve_web.py 把 `/v2/*` 和 `/ws` 反代到 Nakama,和线上路由一致(契约 §3.3.1) |
-| 7b Web 冒烟(自动) | `python3 tools/web_smoke.py` | ~2min | 真 Chrome 里跑**桌面 + 手机竖屏**两档:登录 → 大厅 → **建房进房间**。断言 `[config]` / `[layout]` 逻辑视口 / `[lobby] 在线` / `[room]` 房名人数。**这是唯一会跑到 `ServerConnection` 联机时序的自动测试**(见坑 ⑧) |
+| 7b Web 冒烟(自动) | `python3 tools/web_smoke.py` | ~2min | 真 Chrome 里跑**桌面(鼠标) + 手机竖屏(真触屏事件)**两档:登录 → 大厅 → **点进别人的房间** → 退出 → **自己建房**。断言 `[config]` / `[layout]` 逻辑视口 / `[lobby] 在线` / 两次 `[room]` 的房名人数。**这是唯一会跑到 `ServerConnection` 联机时序的自动测试**(见坑 ⑧),也是唯一用手指而不是鼠标点界面的测试(见坑 ⑩) |
 
 层 4 还能打线上(部署验证,不改源码):
 
@@ -63,6 +63,7 @@ docker rm -f nak-default
 | `godot/**.gd` | 2 + 3 | 6 |
 | `godot/src/autoload/ServerConnection.gd`(或任何联机时序) | 2 + 3 + **7b** | 层 1–6 一条都覆盖不到这里,见坑 ⑧ |
 | `godot/**.tscn` | 3 | 5(布局改动肉眼确认) |
+| 大厅/房间的**点击交互**(点哪儿进哪儿、连的哪个信号) | 2 + 3 + **7b** | 层 5/6 都是鼠标,手指点不动的东西它们看不见,见坑 ⑩ |
 | UI 文案加了新符号/emoji | 3b | 缺字就把它补进 `check_fonts.gd` 的 `MUST`,字体不够就跑 `tools/subset_fonts.sh` 重新生成 |
 | `images/**` 或导出相关 | 7 | 部署契约验证:`docs/deployment-contract.md` §4 |
 | `godot/export_presets.cfg` | 7 | 制品自检在 `tools/build_web.sh` 里,导出即跑 |
@@ -81,7 +82,7 @@ godot --path godot --write-movie /tmp/shots/f.png --quit-after 10
 产出 `/tmp/shots/f00000009.png`(取最后一帧)。默认拍主场景(Login);拍别的场景,
 临时把 `godot/project.godot` 的 `run/main_scene` 指过去,拍完改回来。
 
-## 九个坑
+## 十个坑
 
 1. **层 2 的 `--editor` 不能省。** 没有它,Godot 在加载任何脚本**之前**就退出了——
    正确代码和语法错误代码输出逐字节相同,检查等于没做(故障注入验证过)。
@@ -116,11 +117,25 @@ godot --path godot --write-movie /tmp/shots/f.png --quit-after 10
    7200 秒把它盖得严严实实:同一份客户端,打 compose 一切正常,打默认配置的
    Nakama 一分钟后就废。**发版前用上面那段「默认配置的 Nakama」跑一遍层 7b。**
 
+10. **用鼠标点手机档位,等于没测手机。** 鼠标和手指在 Godot 里走的是两条路:
+   `InputEventMouseButton` 的**双击标记是引擎按两次 mousedown 的时间差自己算的**,
+   而 `InputEventScreenTouch.double_tap` 要靠平台上报 —— **Godot Web 的触屏回调
+   只传(类型, 触点数, 坐标),这个字段恒为 false**(`build/web/index.js` 里的
+   `_godot_js_input_touch_cb`)。后果:ItemList 的 `item_activated`
+   (只在双击/回车时发)在**手机浏览器上永远不会发**,「双击房间行进房」这条路
+   在手机上根本不存在。而层 7b 当时用 `Input.dispatchMouseEvent` 点手机档位,
+   鼠标双击一路正常 —— 2026-08-28 的「手机上双击进不了房间」就是这么活过全部
+   7 层的。现在手机档位一律发 `Input.dispatchTouchEvent`。
+   **推论:凡是「只有某种输入方式才触发」的信号(双击、右键、手势),
+   都不能指望鼠标档位替你测。**
+
 ## 这些层各自是怎么来的
 
 每一层都对应一个真踩过的坑:层 2 的 `--editor` 来自一条从未生效过的假检查;层 3 来自
 「节点路径错位只在运行时炸」;层 4 抓过 3 个单测全绿但跨端契约错位的 bug(Lua 空表
 编码成 `{}`、`draw_streak` 发错消息);层 5 来自「布局全对但小成一团没法用」。
+层 7b 的「用真触屏事件点房间列表」来自 2026-08-28 的「手机上双击进不了房间」——
+同一份代码,鼠标点得进、手指点不进(坑 ⑩)。
 层 7b 的「一路点进房间」来自 2026-08-27 的两个线上 bug:客户端丢掉进房第一条
 ROOM_STATE(全 7 层都看不见),以及 token 60 秒过期后大厅静默失效(只在**线上的
 参数**下才出现)。

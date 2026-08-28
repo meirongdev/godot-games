@@ -25,6 +25,10 @@ var _history_loaded := false
 var _pending_messages: Array = []
 ## 状态行上正挂着「列表刷不出来」。恢复之后要把它撤掉,不能一直挂在那儿。
 var _showing_list_error := false
+## 进房请求在飞。双击的第二下、或者手快连点两下,不该再发一次。
+var _joining := false
+## 房间行的坐标日志上次打的是什么 —— 一样就不重复打了(3 秒刷一次,会刷屏)。
+var _last_row_log := ""
 
 
 func _ready() -> void:
@@ -32,7 +36,17 @@ func _ready() -> void:
 	ServerConnection.lobby_message.connect(_on_message)
 	create_button.pressed.connect(_on_create_pressed)
 	chat_edit.text_submitted.connect(_on_chat_submitted)
-	room_list.item_activated.connect(_on_room_activated)
+	# ⚠️ 进房必须连 item_clicked(点一下),不能只连 item_activated(双击/回车)。
+	# item_activated 要求输入事件带「双击」标记,而**手机浏览器上这个标记根本
+	# 不存在**:Godot Web 的触屏回调只把(类型, 触点数, 坐标)传进引擎
+	# (build/web/index.js 里的 _godot_js_input_touch_cb),
+	# InputEventScreenTouch.double_tap 恒为 false;引擎的「触屏→鼠标」模拟又是
+	# 直接抄这个字段的,于是手指怎么点都不会触发 item_activated ——
+	# 这就是「手机上双击进不了房间」。
+	# 桌面网页版一直是好的,因为**鼠标**的双击是 DisplayServer 按两次 mousedown
+	# 的时间差自己算出来的,不依赖浏览器给标记。所以这个 bug 只在手机上现形。
+	room_list.item_clicked.connect(_on_room_clicked)
+	room_list.item_activated.connect(_on_room_activated)   # 桌面:双击/回车
 
 	# 竖屏一屏放不下「房间/在线/聊天」三块,用分段切换。
 	# 用三个 toggle Button 而不是 TabContainer:页签是手机上的主导航,
@@ -172,11 +186,45 @@ func _refresh_rooms() -> void:
 		# 进行中的房间不能加入,置灰
 		room_list.set_item_disabled(room_list.item_count - 1, r["phase"] != "waiting")
 
+	# 和建房按钮同理:把每一行房间的实际矩形打出来(逻辑坐标),给
+	# tools/web_smoke.py 当点击靶子 —— 免得它自己按 .tscn 反算行高。
+	# 只打**看得见**的行:滚出去的行坐标照样算得出来,点上去却会打到别的控件,
+	# 那种假点击比测不到还糟。房间列表里混着别人建的房,所以带上行号和房名,
+	# 测试按名字挑自己要点的那一行。
+	await get_tree().process_frame
+	var lines := PackedStringArray()
+	for i in room_list.item_count:
+		var row := room_list.get_item_rect(i)
+		if row.position.y + row.size.y > room_list.size.y:
+			break
+		lines.append("[layout] 房间行 %d %d,%d %dx%d %s" % [
+			i, room_list.global_position.x + row.position.x,
+			room_list.global_position.y + row.position.y,
+			row.size.x, row.size.y, room_list.get_item_text(i)])
+	var blob := "\n".join(lines)
+	if blob != _last_row_log:
+		_last_row_log = blob
+		print(blob)
+
+
+func _on_room_clicked(index: int, _at_position: Vector2, mouse_button: int) -> void:
+	if mouse_button == MOUSE_BUTTON_LEFT:
+		_on_room_activated(index)
+
 
 func _on_room_activated(index: int) -> void:
-	if index < 0 or index >= _rooms.size():
+	if index < 0 or index >= _rooms.size() or _joining:
 		return
-	if await ServerConnection.join_room_async(_rooms[index]["match_id"]) == OK:
+	if _rooms[index]["phase"] != "waiting":
+		status.text = "这局已经开始了,进不去 —— 等他们打完"
+		return
+	# 手机上从点下去到场景切换可能要一两秒,没有这一行的话看着像没点着,
+	# 用户会接着猛点(而那些点会被 _joining 挡掉,更像卡死)。
+	status.text = "正在进房…"
+	_joining = true
+	var err := await ServerConnection.join_room_async(_rooms[index]["match_id"])
+	_joining = false
+	if err == OK:
 		get_tree().change_scene_to_file("res://src/room/Room.tscn")
 	else:
 		status.text = "进房失败:%s" % ServerConnection.error_message
