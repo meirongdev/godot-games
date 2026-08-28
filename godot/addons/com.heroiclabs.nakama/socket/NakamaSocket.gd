@@ -297,6 +297,26 @@ func _send_async(p_message, p_parse_type = NakamaAsyncResult, p_ns = NakamaRTAPI
 		call_deferred("_cancel_request", id)
 	return _requests[id]
 
+# ---- 本地补丁(见 docs/nakama-godot-guide.md「本地改动」)----
+# 协议层 ping:服务端原生支持 {"ping":{}} 信封并回 {"pong":{}}(Nakama 3.40.0
+# 实测),上游 SDK 没暴露它。用途:探测半开连接。手机 Wi-Fi 切 4G、蜂窝网
+# NAT 超时之后,socket 在客户端看是连着的(is_connected_to_host() = true),
+# 实际上收发全废;而这个 SDK 的请求**没有超时**(_requests 只在 close 时被
+# cancel),不主动探一下,谁也发现不了连接已经死了。
+class Ping extends NakamaAsyncResult:
+	func serialize() -> Dictionary:
+		return {}
+	func get_msg_key() -> String:
+		return "ping"
+	func _to_string():
+		return "Ping<>"
+
+## 发一个协议层 ping,服务端活着就回 pong。
+## ⚠️ 半开连接上这个 await 永远不返回(见上),调用方必须自带超时。
+func ping_async():
+	return await _send_async(Ping.new()).completed
+# ---- 本地补丁结束 ----
+
 ## If the socket is connected.
 func is_connected_to_host():
 	return _adapter.is_connected_to_host()

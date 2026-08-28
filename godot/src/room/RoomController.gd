@@ -129,6 +129,13 @@ func _apply_room_state(payload: Dictionary) -> void:
 	if _phase == "waiting":
 		status.text = "%d 人在房间" % _players.size()
 
+	# 对局进行中而游戏区还空着:掉线重连回来时,服务端会补发定向的
+	# GAME_STARTED(room.lua match_join),这里是它的兜底 —— ROOM_STATE
+	# 自带 game/settings,足够把游戏场景挂起来。没有这一层,任何错过
+	# GAME_STARTED 的时序都会让房间页只剩花名册,游戏区永远「还在等待」。
+	if _phase == "playing" and _game == null:
+		_start_game({"game": game_id, "settings": JsonSafe.dict(payload, "settings")})
+
 
 func _start_game(payload: Dictionary) -> void:
 	var game_id: String = payload.get("game", "")

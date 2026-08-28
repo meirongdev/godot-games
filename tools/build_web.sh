@@ -67,6 +67,16 @@ if ! grep -q 'accept_gzip = false' \
 	exit 1
 fi
 
+# 第二处本地修改:协议层 ping(探测半开连接)。丢了它,ServerConnection 的
+# _probe_socket_async 调不到 ping_async —— 手机 Wi-Fi 切 4G 后又会回到
+# 「桌面打了 5 轮,手机还在等待」。
+if ! grep -q 'func ping_async' \
+     godot/addons/com.heroiclabs.nakama/socket/NakamaSocket.gd; then
+	echo "✗ Nakama SDK 少了 ping_async 的本地修改 —— 半开连接探测会失效" >&2
+	echo "  见 docs/nakama-godot-guide.md「本地改动」,重新打上再构建" >&2
+	exit 1
+fi
+
 # 汉字字体必须真的在包里。check_fonts.gd 验的是主题配置,这条验的是导出结果 ——
 # 万一将来有人给 export_presets 加了把 ui/ 排掉的 filter,这里会拦住。
 if ! grep -qa 'NotoSansSC' build/web/index.pck; then

@@ -21,6 +21,15 @@ const REQUEST_TIMEOUT_SEC := 10
 ## **房间页一次 HTTP 都不发**,断了没人知道 —— 巡检收到这里,两个场景一起盖。
 const HEALTH_CHECK_SEC := 3.0
 
+## socket 静默多久之后开始怀疑它死了(秒)。对局中服务端每轮都有广播
+## (rps 的节奏 ≤6 秒一条),大厅的聊天/上下线也算 —— 真到 12 秒一条都没有,
+## 要么确实没人说话(探一下,2 帧的开销),要么连接已经半开。
+const PROBE_IDLE_SEC := 12.0
+
+## ping 发出去多久没回 pong 就判死(秒)。局域网/家用宽带的 RTT 远小于这个数;
+## 判死的代价也只是重连一次(1~2 秒),判漏的代价才是「永远还在等待」。
+const PROBE_TIMEOUT_SEC := 5.0
+
 ## 重连前刷 session 的余量(秒)。socket 的 token 是**连接那一刻**写进 URL 的,
 ## 过期了握手直接 401(实测),所以宁可多刷一次,也不拿快过期的 token 去连。
 const SESSION_REFRESH_MARGIN_SEC := 30
@@ -41,6 +50,9 @@ var _reconnecting := false
 ## 进房那一刻服务端广播的 ROOM_STATE。见 replay_room_state()。
 var _last_room_state := {}
 var _health_timer := 0.0
+## 最后一次从 socket 收到任何东西的时刻(毫秒)。半开探测的依据。
+var _last_rx_msec := 0
+var _probing := false
 ## 切场景时捎给下一个场景显示的一句话。房间页被踢回大厅时,原因得跟着走,
 ## 否则用户只看到自己莫名回到了大厅。由下一个场景读完清空。
 var notice := ""
@@ -88,6 +100,51 @@ func _process(delta: float) -> void:
 	_health_timer = 0.0
 	if not is_socket_connected():
 		await ensure_socket_async()
+		return
+	# ⚠️ 「连着」不等于「活着」。手机 Wi-Fi 切 4G、蜂窝网 NAT 超时都会把连接
+	# 变成**半开**:客户端这边看一切正常,发出去的都进了黑洞,服务端早就把人
+	# 从房间里移走了 —— 桌面打了 5 轮,手机还停在「等待」,就是这个。
+	# 浏览器不暴露 WS 协议层的 ping/pong,Godot 也拿不到,只能自己在应用层探。
+	if Time.get_ticks_msec() - _last_rx_msec > PROBE_IDLE_SEC * 1000.0:
+		_probe_socket_async()
+
+
+## 手机锁屏/切后台回来的那一刻,别等下一个巡检周期 —— 立刻查。
+## (页面冻结期间 _process 完全不跑,巡检的计时器也是死的;这里是唤醒后
+## 最早能做事的时机。ticks_msec 是系统单调钟,冻结期间照走,所以上面的
+## 静默判断在唤醒后的第一次巡检就会成立。)
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_health_timer = HEALTH_CHECK_SEC
+
+
+## 半开探测:ping 一下,PROBE_TIMEOUT_SEC 秒内没有 pong 就强制断开重连。
+## SDK 的请求没有超时,所以不能 await ping 本身 —— 半开连接上它永远不返回;
+## 用旁边的计时器当裁判,close() 会把挂着的 ping 一并 cancel 掉。
+func _probe_socket_async() -> void:
+	if _probing:
+		return
+	_probing = true
+	var got_pong := [false]
+	_ping_and_flag(got_pong)
+	await get_tree().create_timer(PROBE_TIMEOUT_SEC).timeout
+	_probing = false
+	if got_pong[0] or _socket == null or not is_socket_connected():
+		return   # 活着;或者别的路径已经在处理断线了
+	push_warning("[socket] ping %.0f 秒没回 —— 连接是半开的,强制重连" % PROBE_TIMEOUT_SEC)
+	_socket.close()
+	await ensure_socket_async()
+
+
+func _ping_and_flag(got_pong: Array) -> void:
+	var res = await _socket.ping_async()
+	if res != null and not res.is_exception():
+		got_pong[0] = true
+		_mark_rx()
+
+
+func _mark_rx() -> void:
+	_last_rx_msec = Time.get_ticks_msec()
 
 
 # ---------------------------------------------------------------- 认证
@@ -144,7 +201,7 @@ func connect_to_server_async() -> int:
 	# 空转的节点。适配器内部本来就复用同一个 WebSocketPeer,连都能重连。
 	if _socket == null:
 		_socket = Nakama.create_socket_from(_client)
-		_socket.connected.connect(func(): socket_connected.emit())
+		_socket.connected.connect(func(): _mark_rx(); socket_connected.emit())
 		_socket.closed.connect(func(): socket_closed.emit())
 		_socket.received_error.connect(func(e): push_error("[socket] %s" % e))
 		_socket.received_match_state.connect(_on_match_state)
@@ -282,6 +339,7 @@ func send_lobby_message_async(text: String) -> void:
 
 
 func _on_channel_presence(evt: NakamaRTAPI.ChannelPresenceEvent) -> void:
+	_mark_rx()
 	for p in evt.joins:
 		_lobby_users[p.user_id] = p.username
 	for p in evt.leaves:
@@ -290,6 +348,7 @@ func _on_channel_presence(evt: NakamaRTAPI.ChannelPresenceEvent) -> void:
 
 
 func _on_channel_message(msg: NakamaAPI.ApiChannelMessage) -> void:
+	_mark_rx()
 	if msg.code != 0:     # 非 0 是加入/离开等系统消息
 		return
 	var content = JSON.parse_string(msg.content)
@@ -464,6 +523,7 @@ func send(op_code: int, data: Dictionary = {}) -> void:
 
 
 func _on_match_state(state: NakamaRTAPI.MatchData) -> void:
+	_mark_rx()
 	var payload = JSON.parse_string(state.data)
 	var data: Dictionary = payload if payload is Dictionary else {}
 	# 只缓存**当前房间**的状态。刚离开的房间可能还有一帧在路上,不校验的话

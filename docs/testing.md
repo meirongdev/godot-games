@@ -23,7 +23,8 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 | 2 GDScript 解析 | `godot --headless --editor --path godot --quit 2>&1 \| grep -icE "SCRIPT ERROR\|Parse Error"`(应为 0) | ~5s | 语法/类型错误 |
 | 3 场景节点路径 | `godot --headless --path godot --script res://tests/check_scenes.gd` | ~3s | `.tscn` 节点名与 `.gd` 里 `$Path` 的错位(运行时才炸的那种) |
 | 3b 字体覆盖 | `godot --headless --path godot --script res://tests/check_fonts.gd` | ~2s | 主题里的字体覆不覆盖 UI 用到的字。**Web 拿不到系统字体**,缺字就是豆腐块,而桌面版靠系统回退看不出来 |
-| 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~15s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态 |
+| 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~25s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态、**掉线重连观战**(对局中掉线的人要能回房) |
+| 4b 客户端断线自愈 | `python3 tools/e2e_client_reconnect.py` | ~40s | **真 ServerConnection**(headless Godot)打一个可**冻结**的 TCP 代理,复刻半开连接(Wi-Fi 切 4G:socket 看着连着、收发全黑洞)。断言:探活发现 → 强制重连 → 自动回房。层 1–4 全是 Python 客户端造不出这个,7b 不掐网,桌面拔网线是 close 不是黑洞 —— **只有这层能验「桌面打了 5 轮手机还在等待」修没修好** |
 | 5 场景截图 | 见下 | ~10s/景 | 布局灾难(缩成一团、区域被压成 0 高、控件隐形 —— 层 2/3 全都看不见) |
 | 6 桌面多开真玩 | `godot --path godot -- --device-suffix=a &`(b、c 同理) | 人肉 | 客户端运行时逻辑与手感 |
 | 7 Web 版(人肉) | `./tools/build_web.sh && python3 tools/serve_web.py` → `http://localhost:8080/?player=a` | ~1min | Web 特有问题(wasm、JS bridge、软键盘)+ **同源拓扑**:serve_web.py 把 `/v2/*` 和 `/ws` 反代到 Nakama,和线上路由一致(契约 §3.3.1) |
@@ -61,7 +62,7 @@ docker rm -f nak-default
 | `nakama/modules/rules/*.lua` | 1 | 4 |
 | `nakama/modules/`(适配层/RPC) | 1 + 4 | **先 `docker compose restart nakama`**(见坑 ②) |
 | `godot/**.gd` | 2 + 3 | 6 |
-| `godot/src/autoload/ServerConnection.gd`(或任何联机时序) | 2 + 3 + **7b** | 层 1–6 一条都覆盖不到这里,见坑 ⑧ |
+| `godot/src/autoload/ServerConnection.gd`(或任何联机时序) | 2 + 3 + **4b** + **7b** | 层 1–6 一条都覆盖不到这里,见坑 ⑧;断线/重连的时序只有 4b 能造出半开连接 |
 | `godot/**.tscn` | 3 | 5(布局改动肉眼确认) |
 | 大厅/房间的**点击交互**(点哪儿进哪儿、连的哪个信号) | 2 + 3 + **7b** | 层 5/6 都是鼠标,手指点不动的东西它们看不见,见坑 ⑩ |
 | UI 文案加了新符号/emoji | 3b | 缺字就把它补进 `check_fonts.gd` 的 `MUST`,字体不够就跑 `tools/subset_fonts.sh` 重新生成 |

@@ -12,6 +12,9 @@ const HAND_NAME := { 0: "石头", 1: "布", 2: "剪刀" }
 @onready var spectator: Label = $VBox/Spectator
 
 var _alive: Array = []
+## 见过本局的任何一轮吗。没见过就当观众 = 掉线重连回来的(或错过开局的),
+## 文案和「你已出局」区分开 —— 他没输,只是掉线了。
+var _seen_round := false
 var _thrown := false
 var _time_left := 0.0
 var _round_seconds := 3.0
@@ -59,6 +62,10 @@ func _on_round_begin(p: Dictionary) -> void:
 		round_label.text += "  (连续平局 ×%d,加速!)" % streak
 
 	var i_am_alive := _alive.has(my_id)
+	if not i_am_alive:
+		spectator.text = "你已出局,观战中" if _seen_round \
+			else "这局开打时你不在 —— 先观战,下一局自动加入"
+	_seen_round = true
 	spectator.visible = not i_am_alive
 	hands_box.visible = i_am_alive
 	_set_input_enabled(i_am_alive)

@@ -154,12 +154,14 @@ cp -r nakama-godot/addons/com.heroiclabs.nakama \
 
 ### 3.1 本地改动(重新拷 addon 后必须重新打上)
 
-vendor 进来的 SDK 有**一处**本地修改。它不是优化,是 Web 版能不能用的开关 ——
-重新从 master 拷 `addons/` 会把它冲掉,而桌面运行和 Python e2e 都测不出来。
+vendor 进来的 SDK 有**两处**本地修改。都不是优化 —— 一处是 Web 版能不能用的
+开关,一处是手机断线能不能被发现的开关。重新从 master 拷 `addons/` 会把它们
+冲掉,而桌面运行和 Python e2e 都测不出来(`tools/build_web.sh` 各有一条守卫)。
 
 | 文件 | 改动 | 为什么 |
 |---|---|---|
 | `client/NakamaHTTPAdapter.gd` · `send_async()` | Web 平台上 `req.accept_gzip = false` | 见下 |
+| `socket/NakamaSocket.gd` | 加 `ping_async()`(协议层 `{"ping":{}}` 信封,服务端回 `{"pong":{}}`,Nakama 3.40.0 实测) | 上游 SDK 不暴露 ping,而它的请求**没有超时**(`_requests` 只在 close 时被 cancel)。半开连接(手机 Wi-Fi 切 4G、蜂窝 NAT 超时)上 `is_connected_to_host()` 恒 true、任何 await 永远不返回 —— 没有 ping 就没有任何办法发现连接死了。`ServerConnection._probe_socket_async` 靠它探活:静默 12 秒就 ping,5 秒没 pong 判死并强制重连。验证:`python3 tools/e2e_client_reconnect.py` 用可冻结的 TCP 代理真造一个半开连接 |
 
 Web 上 Godot 的 `HTTPRequest` 底层走浏览器的 `fetch`,响应体**已经被浏览器解过
 gzip**,但 Chrome 仍然在 `Response.headers` 里保留 `Content-Encoding: gzip`。
