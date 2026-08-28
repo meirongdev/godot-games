@@ -45,6 +45,26 @@ function M.can_start(order, ready, host, requester, min_players)
   return true, nil
 end
 
+--- 能否进房。
+-- 「对局进行中」不等于「门焊死了」:**这一局的人**掉线后回来要能进 ——
+-- 手机上锁屏、切微信、Wi-Fi 切 4G 都会断线,断线即除名(Nakama 的
+-- match_leave),不放行的话掉线的人只能在大厅干等到局终(2026-08-28
+-- 实测:重连后 match_join 恒被拒「游戏已开始」,这就是「桌面打了 5 轮,
+-- 手机还在等待」)。回来的人**不回到对局里**(掉线时已按离场处理),
+-- 进的是观战席,下一局自动参加 —— 和「出局了留在观战席看完」同一条路。
+-- @param phase     string  "waiting" | "playing"
+-- @param is_member boolean 这个 user_id 是否进过这个房间(掉线不清除)
+-- @param count     number  当前在房人数
+-- @param max       number  上限
+-- @return boolean ok, string|nil reason
+function M.can_join(phase, is_member, count, max)
+  if count >= max then return false, "房间已满" end
+  if phase ~= "waiting" and not is_member then
+    return false, "游戏已开始"
+  end
+  return true, nil
+end
+
 --- 房主离开后谁接手。
 -- @param order table  玩家顺序数组,**调用方须先移除离开者**
 -- @param host  string 离开前的房主

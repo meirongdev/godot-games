@@ -73,20 +73,23 @@ end
 
 function M.match_join_attempt(_, _, _, state, presence, _)
   local game = games.get(state.game_id)
-  -- 重连:已在房间的 user_id 一律放行,即使游戏已开始
+  -- 同一 user_id 还挂着旧 session(半开连接没被服务端判死)的重连:直接放行。
   if state.presences[presence.user_id] ~= nil then
     return state, true
   end
-  if state.phase ~= "waiting" then
-    return state, false, "游戏已开始"
-  end
-  if #state.order >= game.max_players then
-    return state, false, "房间已满"
+  -- names 只进不出(match_leave 不清它),所以它就是「这个房间的人」的名单 ——
+  -- 掉线的人凭它回来,见 room_rules.can_join 的注释。
+  local ok, why = room_rules.can_join(
+    state.phase, state.names[presence.user_id] ~= nil,
+    #state.order, game.max_players)
+  if not ok then
+    return state, false, why
   end
   return state, true
 end
 
-function M.match_join(_, dispatcher, _, state, presences)
+function M.match_join(_, dispatcher, tick, state, presences)
+  local game = games.get(state.game_id)
   for _, p in ipairs(presences) do
     if state.presences[p.user_id] == nil then
       state.order[#state.order + 1] = p.user_id
@@ -100,19 +103,41 @@ function M.match_join(_, dispatcher, _, state, presences)
     end
   end
   sync(dispatcher, state)
+
+  -- 对局进行中进来的(= 掉线重连的,见 match_join_attempt),要给**这一个人**
+  -- 补一份现场,不然他的房间页只有花名册,游戏区永远空着「还在等待」:
+  --   1. GAME_STARTED(定向)—— 客户端靠它挂载游戏场景;
+  --   2. game.on_join —— 游戏自己补当前回合(轮数、剩余秒数等)。
+  -- 广播顺序刻意和正常开局一致:ROOM_STATE(上面的 sync)→ GAME_STARTED →
+  -- 回合快照,客户端不需要为重连写任何特殊时序。
+  if state.phase == "playing" then
+    for _, p in ipairs(presences) do
+      dispatcher.broadcast_message(OP.GAME_STARTED, nk.json_encode({
+        game = state.game_id, settings = state.settings }), { p })
+      if game.on_join then
+        game.on_join(state, dispatcher, tick, p)
+      end
+    end
+  end
   return state
 end
 
 function M.match_leave(_, dispatcher, _, state, presences)
   local game = games.get(state.game_id)
   for _, p in ipairs(presences) do
-    state.presences[p.user_id] = nil
-    state.ready[p.user_id]     = nil
-    for i, uid in ipairs(state.order) do
-      if uid == p.user_id then table.remove(state.order, i); break end
-    end
-    if state.phase == "playing" and game.on_leave then
-      game.on_leave(state, dispatcher, p.user_id)
+    -- ⚠️ 只清「当前这个 session」。掉线重连比旧 session 的 leave 先到时
+    -- (半开连接:新 join 进来了,服务端稍后才判死旧连接),这条迟到的
+    -- leave 带的是**旧** session_id —— 不比对就会把刚回来的人又踢出去。
+    local cur = state.presences[p.user_id]
+    if cur ~= nil and cur.session_id == p.session_id then
+      state.presences[p.user_id] = nil
+      state.ready[p.user_id]     = nil
+      for i, uid in ipairs(state.order) do
+        if uid == p.user_id then table.remove(state.order, i); break end
+      end
+      if state.phase == "playing" and game.on_leave then
+        game.on_leave(state, dispatcher, p.user_id)
+      end
     end
   end
   -- next_host 要的是「已移除离开者」之后的 order

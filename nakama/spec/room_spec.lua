@@ -225,3 +225,85 @@ describe("room 必需回调齐全", function()
     end
   end)
 end)
+
+describe("room 对局中掉线重连", function()
+  -- 2026-08-28:手机在对局中断线(锁屏/切后台),Nakama 立刻派 match_leave
+  -- 把人除名;人回来时 match_join_attempt 恒拒「游戏已开始」—— 桌面打了
+  -- 5 轮,手机只能在门外等到局终。names 只进不出,凭它认出「自己人」。
+  local function playing_room()
+    local s, d = fresh("a"), mock.dispatcher()
+    s = join(s, d, { "a", "b", "c" })
+    s = room.match_loop(nil, d, 1, s, {
+      mock.message("a", OP_READY, { ready = true }),
+      mock.message("b", OP_READY, { ready = true }),
+      mock.message("c", OP_READY, { ready = true }),
+    })
+    s = room.match_loop(nil, d, 2, s, { mock.message("a", OP_START, {}) })
+    assert.equal("playing", s.phase)
+    return s, d
+  end
+
+  it("掉线的成员在对局中能重新进房", function()
+    local s, d = playing_room()
+    s = room.match_leave(nil, d, 3, s, { mock.presence("b") })
+    local _, ok = room.match_join_attempt(nil, nil, 4, s, mock.presence("b"), nil)
+    assert.is_true(ok)
+  end)
+
+  it("陌生人在对局中仍被拒绝", function()
+    local s = playing_room()
+    local _, ok, why = room.match_join_attempt(nil, nil, 4, s, mock.presence("z"), nil)
+    assert.is_false(ok)
+    assert.equal("游戏已开始", why)
+  end)
+
+  it("重连的人收到定向 GAME_STARTED + 当前回合快照,且不在 alive 里", function()
+    local s, d = playing_room()
+    s = room.match_leave(nil, d, 3, s, { mock.presence("b") })
+    local before = #d.broadcasts
+    s = room.match_join(nil, d, 30, s, { mock.presence("b") })
+
+    local started, round
+    for i = before + 1, #d.broadcasts do
+      local bc = d.broadcasts[i]
+      if bc.op == OP_STARTED then started = bc end
+      if bc.op == 30 then round = bc end     -- ROUND_BEGIN
+    end
+    assert.is_not_nil(started, "缺定向 GAME_STARTED")
+    assert.equal("b", started.presences[1].user_id)
+    assert.is_not_nil(round, "缺回合快照")
+    assert.equal("b", round.presences[1].user_id)
+    local snap = require("dkjson").decode(round.data)
+    for _, uid in ipairs(snap.alive) do
+      assert.is_not.equal("b", uid)   -- 掉线时已按离场处理,回来是观战
+    end
+    -- 回到了花名册
+    local roster = mock.last(d, OP_ROOM_STATE).players
+    local found = false
+    for _, p in ipairs(roster) do found = found or p.id == "b" end
+    assert.is_true(found)
+  end)
+
+  it("正常 waiting 加入不发定向 GAME_STARTED", function()
+    local s, d = fresh("a"), mock.dispatcher()
+    s = join(s, d, { "a" })
+    for _, bc in ipairs(d.broadcasts) do
+      assert.is_not.equal(OP_STARTED, bc.op)
+    end
+  end)
+
+  it("迟到的旧 session leave 不会把刚重连的人再踢出去", function()
+    local s, d = playing_room()
+    -- b 的旧连接断了 → match_leave(旧 session)
+    s = room.match_leave(nil, d, 3, s, { mock.presence("b") })
+    -- b 带新 session 回来
+    local p2 = mock.presence("b"); p2.session_id = "sess-b-new"
+    s = room.match_join(nil, d, 4, s, { p2 })
+    -- 半开连接的另一种时序:旧 session 的 leave 这时才到
+    s = room.match_leave(nil, d, 5, s, { mock.presence("b") })   -- 旧 session_id
+    assert.is_not_nil(s.presences["b"], "新 session 被旧 leave 误杀")
+    local in_order = false
+    for _, uid in ipairs(s.order) do in_order = in_order or uid == "b" end
+    assert.is_true(in_order)
+  end)
+end)

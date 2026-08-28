@@ -143,6 +143,25 @@ function M.on_loop(state, dispatcher, tick, messages)
   end
 end
 
+--- 掉线重连的人进来,给他一个人补当前回合的现场(定向,不打扰别人)。
+-- 他不在 g.alive 里(掉线时已按离场淘汰),客户端会自动进观战席 ——
+-- 和被淘汰的人走的是同一条显示路径。seconds 给**剩余**秒数:
+-- 正在倒计时就是还剩几秒;正在亮牌就是 0,下一轮的 ROUND_BEGIN
+-- 反正 2 秒内就到,不值得为它单独发一份亮牌结果。
+function M.on_join(state, dispatcher, tick, presence)
+  local g = state.g
+  if g == nil then return end
+  local remaining = 0
+  if g.phase == "countdown" and g.deadline > tick then
+    remaining = (g.deadline - tick) / M.tickrate
+  end
+  dispatcher.broadcast_message(OP.ROUND_BEGIN, nk.json_encode({
+    round = g.round, alive = g.alive,
+    seconds = remaining, deadline_tick = g.deadline,
+    draw_streak = g.draw_streak,
+  }), { presence })
+end
+
 function M.on_leave(state, dispatcher, uid)
   local g = state.g
   if g == nil then return end
