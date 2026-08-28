@@ -8,11 +8,25 @@ signal lobby_message(sender_id: String, name: String, text: String)
 signal room_event(op_code: int, payload: Dictionary)
 signal room_joined(match_id: String)
 signal room_left
+## 房间回不去了。两种原因,都不可逆:一个人的房间空置 60 秒被服务端关掉
+## (room.lua 的自动关闭),或者对局已经开始不让重进。房间页收到就该回大厅。
+signal room_lost(reason: String)
 
 const LOBBY_ROOM := "lobby"
 
 ## 单个 HTTP 请求的超时(秒)。家里人用手机连,3 秒(SDK 默认)太紧。
 const REQUEST_TIMEOUT_SEC := 10
+
+## 断线巡检的间隔(秒)。大厅本来靠 3 秒一次的房间列表轮询顺带发现断线,
+## **房间页一次 HTTP 都不发**,断了没人知道 —— 巡检收到这里,两个场景一起盖。
+const HEALTH_CHECK_SEC := 3.0
+
+## 重连前刷 session 的余量(秒)。socket 的 token 是**连接那一刻**写进 URL 的,
+## 过期了握手直接 401(实测),所以宁可多刷一次,也不拿快过期的 token 去连。
+const SESSION_REFRESH_MARGIN_SEC := 30
+
+## 大厅聊天一进门补多少条历史。家庭规模,几十条足够,再多也没人往上翻。
+const LOBBY_HISTORY_LIMIT := 30
 
 var error_message := ""
 
@@ -26,6 +40,10 @@ var _config: NakamaConfig
 var _reconnecting := false
 ## 进房那一刻服务端广播的 ROOM_STATE。见 replay_room_state()。
 var _last_room_state := {}
+var _health_timer := 0.0
+## 切场景时捎给下一个场景显示的一句话。房间页被踢回大厅时,原因得跟着走,
+## 否则用户只看到自己莫名回到了大厅。由下一个场景读完清空。
+var notice := ""
 
 
 func _ready() -> void:
@@ -49,6 +67,27 @@ func _ready() -> void:
 ## 配置是否可用。false 时 error_message 里是给用户看的原因。
 func is_configured() -> bool:
 	return _client != null
+
+
+## 断线巡检。**这是房间页唯一的自愈来源。**
+##
+## 手机上断线是常态而不是异常:锁屏、切到微信看一眼、Wi-Fi 切 4G,浏览器都会
+## 把页面冻起来,而 Chrome 冻页面时会**直接关掉 WebSocket**(实测:控制台报
+## "Page entered Back-Forward Cache" 紧跟一个 WS close)。页面被唤回来之后
+## socket 已经是死的,以前没有任何东西会发现这件事 —— 房间页就那么一直空转。
+##
+## 放在 ServerConnection 而不是各个场景里:大厅碰巧有 3 秒一次的房间列表轮询
+## 顺带查了一下,房间页一次 HTTP 都不发,靠场景自己查就一定会漏。
+func _process(delta: float) -> void:
+	# 还没登录、或者正在重连,都不用巡
+	if _session == null or _socket == null or _reconnecting:
+		return
+	_health_timer += delta
+	if _health_timer < HEALTH_CHECK_SEC:
+		return
+	_health_timer = 0.0
+	if not is_socket_connected():
+		await ensure_socket_async()
 
 
 # ---------------------------------------------------------------- 认证
@@ -141,15 +180,69 @@ func ensure_socket_async() -> int:
 		return OK if is_socket_connected() else ERR_CANT_CONNECT
 
 	_reconnecting = true
-	var err := await connect_to_server_async()
+	# 顺序是刻意的:先换新 token,再连 socket,连上了才谈恢复现场。
+	var err := await _refresh_session_async()
+	if err == OK:
+		err = await connect_to_server_async()
 	if err == OK:
 		# 重连之后大厅频道要重新加入,否则聊天和在线列表还是死的。
 		await join_lobby_async()
+		# 房间也要重新进 —— 光把 socket 连回来是不够的,见 _rejoin_room_async。
+		await _rejoin_room_async()
 	_reconnecting = false
 
-	if err != OK:
+	if err != OK and error_message.is_empty():
 		error_message = "和服务器断开了,检查一下网络"
 	return err
+
+
+## 重连之前把 session 刷新到能用。
+##
+## ⚠️ Nakama 的 `session.token_expiry_sec` **默认只有 60 秒**(实测:不带这个
+## 参数起一个 3.40.0,签出来的 token exp - iat = 60),而 SDK 的 auto_refresh
+## 只在**发 HTTP 请求时**顺带刷 —— 房间页一次 HTTP 都不发,坐在房间里一分钟
+## token 就废了。已经建立的 socket 不受影响(实测:token 过期不会被关),
+## 但重连时 token 是写在 /ws 的 URL 里的,过期就直接 401,于是「断了以后
+## 永远连不回来」。这一步就是补上 auto_refresh 在房间里没机会跑的那一次。
+func _refresh_session_async() -> int:
+	if _session == null:
+		return ERR_UNCONFIGURED
+	if not _session.would_expire_in(SESSION_REFRESH_MARGIN_SEC):
+		return OK
+	# refresh token 默认 1 小时(实测),过了它谁也救不了 —— 只能重新登录。
+	if _session.is_refresh_expired():
+		error_message = "登录太久失效了,刷新一下页面重新进来"
+		return ERR_UNAUTHORIZED
+	var refreshed = await _client.session_refresh_async(_session)
+	if _check(refreshed) != OK:
+		error_message = "登录太久失效了,刷新一下页面重新进来"
+		return ERR_UNAUTHORIZED
+	_session = refreshed
+	return OK
+
+
+## 重连之后重新进房。
+##
+## ⚠️ socket 一断,服务端立刻给这个房间派一次 match_leave —— 人从花名册里移走,
+## 房主也传给了下一个人(实测:两人房里 A 掉线,B 立刻看到「1 人」并接过房主)。
+## 所以只把 socket 连回来是不够的:客户端还以为自己在房里,准备/开局发出去
+## 没人收,房间页停在断线前的画面,而其他人早就看不见你了。
+##
+## 进不去的两种情况都不可逆,直接把人送回大厅,别让他对着一个假房间干等:
+##   - 一个人的房间空置 60 秒被 room.lua 关掉 → "Match not found"(实测)
+##   - 对局已经开始 → match_join_attempt 拒绝「游戏已开始」
+func _rejoin_room_async() -> void:
+	if _match_id.is_empty():
+		return
+	# 服务端会在 match_join 里重新广播 ROOM_STATE,房间页据此自己刷新,
+	# 这里不用手动补 —— _match_id 已经是目标房间,那条状态收得到。
+	var m = await _socket.join_match_async(_match_id)
+	if _check(m) == OK:
+		return
+	var why := error_message
+	_match_id = ""
+	_last_room_state = {}
+	room_lost.emit(why)
 
 
 # ---------------------------------------------------------------- 大厅
@@ -201,16 +294,73 @@ func _on_channel_message(msg: NakamaAPI.ApiChannelMessage) -> void:
 		return
 	var content = JSON.parse_string(msg.content)
 	if content is Dictionary and content.has("msg"):
-		# ⚠️ ApiChannelMessage 没有 username 字段(只有 sender_id)。
-		# 显示名从大厅 presence 表里查,查不到就退化成 id 前 6 位。
-		var who: String = _lobby_users.get(msg.sender_id, msg.sender_id.substr(0, 6))
-		lobby_message.emit(msg.sender_id, who, content["msg"])
+		lobby_message.emit(msg.sender_id, _sender_name(msg), content["msg"])
+
+
+## 一条聊天该显示谁发的。
+##
+## 帧里自带 username(实测:实时推来的 channel_message 和 REST 拉的历史都有
+## 这个字段),优先用它 —— 历史消息的发送者常常已经不在线了,只查 presence 表
+## 的话那些人会显示成一串 id。presence 表只当兜底。
+func _sender_name(msg: NakamaAPI.ApiChannelMessage) -> String:
+	if not msg.username.is_empty():
+		return msg.username
+	return _lobby_users.get(msg.sender_id, msg.sender_id.substr(0, 6))
+
+
+## 拉大厅聊天的最近记录,按时间正序返回 [{sender_id, name, text}]。
+##
+## 频道是带 persistence 加入的(join_lobby_async),消息一直存在服务端 ——
+## 只是以前没人去取。于是每次从房间回到大厅、或者手机刷新一下页面,
+## 聊天记录就是空的,看着像「消息全丢了」。
+func lobby_history_async() -> Array:
+	if _lobby_channel.is_empty():
+		return []
+	# forward=false = 从最新往回取,拿到的是倒序,显示前要翻回来。
+	var res = await _client.list_channel_messages_async(
+		_session, _lobby_channel, LOBBY_HISTORY_LIMIT, false)
+	if _check(res) != OK:
+		return []
+	var out := []
+	for msg in res.messages:
+		if msg.code != 0:
+			continue
+		var content = JSON.parse_string(msg.content)
+		if content is Dictionary and content.has("msg"):
+			out.push_front({
+				"sender_id": msg.sender_id,
+				"name": _sender_name(msg),
+				"text": content["msg"],
+			})
+	return out
 
 
 # ---------------------------------------------------------------- 房间
 
+## 发一个 RPC。**所有 RPC 都必须走这里。**
+##
+## ⚠️ SDK 的 auto_refresh **管不到 RPC。** 它挂在「接收 session 对象」的那些
+## 方法上(`_refresh_session(p_session)`),而 NakamaClient.rpc_async 是把
+## `p_session.token` 当一个裸 bearer 串传下去的(NakamaClient.gd:789-790,
+## 全 SDK 只有这两处这么干)。于是 token 一过期,list_rooms / list_games /
+## create_room 全部 401,而且**永远不会自己好** —— 大厅这时 socket 还连得好好的
+## (token 过期不会关已建立的 socket,实测),所以连 ensure_socket_async 都不会
+## 被触发,没有任何一条路径会去刷 session。
+##
+## 实测(Nakama `session.token_expiry_sec` 默认 **60 秒**):登录后第 60 秒起,
+## list_rooms 恒定返回空列表(现有房间在大厅里全部消失,显示「还没有房间」),
+## 建房报英文的 "Auth token invalid",从此再也建不出房、也进不了房 ——
+## **这就是「手机无法进入房间」**:手机上从登录走到点建房本来就容易超过一分钟。
+## 本地 compose 把 token 设成了 7200 秒,把这件事盖得严严实实(契约 §3.2 已补上
+## 这个参数的要求)。
+func _rpc_async(rpc_name: String, payload: String):
+	# 刷不动也照发:让服务端说话,比在这里自己编一个错误更好排查。
+	await _refresh_session_async()
+	return await _client.rpc_async(_session, rpc_name, payload)
+
+
 func list_rooms_async() -> Array:
-	var res = await _client.rpc_async(_session, "list_rooms", "")
+	var res = await _rpc_async("list_rooms", "")
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
@@ -220,7 +370,7 @@ func list_rooms_async() -> Array:
 
 
 func list_games_async() -> Array:
-	var res = await _client.rpc_async(_session, "list_games", "")
+	var res = await _rpc_async("list_games", "")
 	if _check(res) != OK:
 		return []
 	var payload = JSON.parse_string(res.payload)
@@ -238,7 +388,7 @@ func create_room_async(game: String, name: String) -> String:
 	# 从此彻底建不出来 —— 这就是「玩一局退出后就无法再创建房间」的形状。
 	if await ensure_socket_async() != OK:
 		return ""
-	var res = await _client.rpc_async(_session, "create_room",
+	var res = await _rpc_async("create_room",
 		JSON.stringify({"game": game, "name": name}))
 	if _check(res) != OK:
 		return ""
@@ -272,9 +422,18 @@ func join_room_async(match_id: String) -> int:
 	# 上一个房间的状态不能漏到下一个房间去。清在 join 之前:
 	# 服务端的 ROOM_STATE 是在下面这个 await 期间到的,清晚了会把它抹掉。
 	_last_room_state = {}
+	# ⚠️ _match_id 必须在 await **之前**就认领目标房间,不能等 join 返回。
+	# 服务端在 match_join 里广播的第一条 ROOM_STATE 和 join 的应答是两条独立的
+	# 帧,而广播**恒定先到**(实测 12/12):等到 join 返回再写 _match_id,
+	# 那条状态到达时 _match_id 还是空的,_on_match_state 的房间校验会把它
+	# 当成「上一个房间的迟到帧」丢掉 —— 缓存空的,replay_room_state() 无事可做,
+	# 房间页就永远停在写死的「房间」+ 空花名册 + 「等待其他人…」。
+	# 桌面版实测 3/3 必现,而它长得和「进房失败」一模一样。
+	_match_id = match_id
 	var m = await _socket.join_match_async(match_id)
 	var err := _check(m)
 	if err != OK:
+		_match_id = ""
 		return err
 	_match_id = m.match_id
 	room_joined.emit(_match_id)
@@ -290,11 +449,18 @@ func leave_room_async() -> void:
 
 
 ## 往当前房间发一条消息。
+##
+## 尽力而为:socket 死着的时候发不出去,巡检会在几秒内把它连回来,但**这一条
+## 丢了**(玩家得再点一次)。以前这里是完全静默的 —— 点「准备」没反应也不报错。
 func send(op_code: int, data: Dictionary = {}) -> void:
-	if _socket and not _match_id.is_empty():
-		# 第三个参数是 String,不是 PackedByteArray。
-		# 要发二进制得用 send_match_state_raw_async。
-		_socket.send_match_state_async(_match_id, op_code, JSON.stringify(data))
+	if _match_id.is_empty():
+		return
+	if not is_socket_connected():
+		push_warning("[socket] 断线中,op_code=%d 这条没发出去" % op_code)
+		return
+	# 第三个参数是 String,不是 PackedByteArray。
+	# 要发二进制得用 send_match_state_raw_async。
+	_socket.send_match_state_async(_match_id, op_code, JSON.stringify(data))
 
 
 func _on_match_state(state: NakamaRTAPI.MatchData) -> void:
@@ -303,6 +469,9 @@ func _on_match_state(state: NakamaRTAPI.MatchData) -> void:
 	# 只缓存**当前房间**的状态。刚离开的房间可能还有一帧在路上,不校验的话
 	# 它会被缓存下来、再被 replay_room_state() 主动补发到下一个房间去 ——
 	# 而在加缓存之前,这种迟到帧顶多是一次无害的 emit,不会留下来。
+	# ⚠️ 这个校验成立的前提是 join_room_async 在 await 之前就认领了 _match_id
+	# (那边有详细理由)。别把那一行挪回 await 后面,否则进房第一条状态
+	# 每次都会被这里判成迟到帧丢掉。
 	if state.op_code == OpCodes.ROOM_STATE and state.match_id == _match_id:
 		_last_room_state = data
 	room_event.emit(state.op_code, data)
@@ -338,7 +507,12 @@ func _check(result) -> int:
 		push_error("[Nakama] status=%d %s" % [e.status_code, e.message])
 		match e.status_code:
 			-1:  return ERR_CANT_CONNECT
-			401: return ERR_UNAUTHORIZED
+			401:
+				# 401 只有一个意思:这个 token 服务端不认了。原文是英文的
+				# "Auth token invalid",给家里人看没有任何用 —— 原文仍然在上面
+				# 那行 push_error 里,排查不受影响。
+				error_message = "登录失效了 —— 刷新一下页面重新进来"
+				return ERR_UNAUTHORIZED
 			404: return ERR_DOES_NOT_EXIST
 			_:   return FAILED
 	error_message = ""

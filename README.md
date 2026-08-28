@@ -46,6 +46,8 @@ python3 tools/e2e_match.py 3           # 三个真实账号打满一局
 ./tools/build_web.sh && python3 tools/serve_web.py   # http://localhost:8080/?player=a
                                        # serve_web.py 把 /v2/* 和 /ws 反代到 Nakama,
                                        # 拓扑与线上一致(见契约 §3.3.1)
+python3 tools/web_smoke.py             # 真 Chrome 跑桌面+手机两档:登录→大厅→建房进房间
+                                       # 动了 ServerConnection 的联机时序就必须跑这个
 ```
 
 Godot 编辑器打开 `godot/`,F5 即玩(连本地 compose)。

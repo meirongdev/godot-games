@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""冒烟测试:在**真浏览器**里把 Web 制品从登录页跑进大厅。
+"""冒烟测试:在**真浏览器**里把 Web 制品从登录页跑进大厅、再跑进房间。
 
 用法:  python3 tools/web_smoke.py            # 自己起 serve_web.py
        python3 tools/web_smoke.py <url>     # 打一个已经在跑的地址
@@ -15,6 +15,14 @@ HTTP 栈。2026-08-27 上线卡死就是这么漏的:Godot 的 HTTPRequest 在 W
 
 契约 §4.2.1 原本写的是「必须单独做一次:真的开一次页面」—— 手动步骤。
 这个脚本就是把那一步变成门禁。
+
+**为什么要一路点到房间里:**
+2026-08-27 上线后手机端报「进不了房间」,根因是进房那一刻服务端广播的
+ROOM_STATE 被客户端丢掉(见 ServerConnection.join_room_async 的注释),
+房间页停在写死的「房间」+ 空花名册 —— 长得和「进房失败」一模一样。
+这个 bug 躲过了全部 7 层测试:Lua 单测只管服务端;e2e_match.py 用的是
+自己写的 Python 客户端,根本不跑 ServerConnection;而这个脚本当时停在大厅。
+所以门禁必须往前推一步:真的进到房间里,并断言房间页拿到了状态。
 
 ⚠️ 标签页必须是**可见**的。Chrome 对隐藏标签不跑 requestAnimationFrame,
 而 Godot 的主循环就挂在 rAF 上 —— 标签一隐藏,引擎直接不转,任何等待都会
@@ -44,9 +52,11 @@ PORT = 9333
 NAME_BASE = "smoke" + str(int(time.time()))[-5:]
 
 # 两个档位都要过。手机档位是这次的重点,桌面档位防回归。
+# dsf = deviceScaleFactor。逻辑坐标换 CSS 像素时要用(CDP 的输入坐标是 CSS 像素,
+# 而客户端 [layout] 打的窗口尺寸是物理像素)。桌面档位不覆写 metrics,所以是 1。
 TIERS = [
-    {"name": "桌面", "win": None, "tag": "d"},
-    {"name": "手机竖屏", "win": (390, 844), "tag": "m"},
+    {"name": "桌面", "win": None, "tag": "d", "dsf": 1},
+    {"name": "手机竖屏", "win": (390, 844), "tag": "m", "dsf": 3},
 ]
 
 # 逻辑视口宽度的上限(手机档位)。基准分辨率不对时这里会是 1280,
@@ -77,6 +87,23 @@ def assert_port_free():
             sys.exit(
                 f"✗ 调试端口 {PORT} 已被占用 —— 很可能是上次没退干净的 Chrome。\n"
                 f"  先清掉再跑:lsof -ti tcp:{PORT} | xargs -r kill -9")
+
+
+def create_button_css(logs, dsf):
+    """从客户端自己打的 [layout] 日志里算出「建房」按钮的 CSS 坐标。
+
+    刻意不按 .tscn 反算布局:那种算法每改一次布局就悄悄失准,而 Lobby.gd
+    会把按钮的实际矩形打出来(逻辑坐标),这里只做一次单位换算。
+    """
+    blob = "\n".join(logs)
+    view = re.search(r"窗口 (\d+)x(\d+) → 逻辑视口 (\d+)x(\d+)", blob)
+    btn = re.search(r"建房按钮 (\d+),(\d+) (\d+)x(\d+)", blob)
+    if not (view and btn):
+        return None
+    win_w, logical_w = int(view.group(1)), int(view.group(3))
+    css_per_logical = (win_w / dsf) / logical_w
+    x, y, w, h = (int(g) for g in btn.groups())
+    return ((x + w / 2) * css_per_logical, (y + h / 2) * css_per_logical)
 
 
 def find_chrome():
@@ -148,7 +175,7 @@ class Page:
         self._shots[mid] = path
 
 
-async def run(url, shot_path, name, win=None):
+async def run(url, shot_path, name, win=None, dsf=1):
     assert_port_free()
     profile = tempfile.mkdtemp(prefix="web-smoke-")
     chrome = subprocess.Popen([
@@ -212,6 +239,18 @@ async def run(url, shot_path, name, win=None):
             if shot_path:
                 await page.shot(shot_path)
                 await asyncio.sleep(1)
+
+            # 继续点「建房」进房间。房名留空,服务端会起「<名字>的房间」,
+            # check() 靠这个名字确认房间页拿到的是**这个**房间的状态。
+            target = create_button_css(page.logs, dsf)
+            if target is None:
+                page.logs.append("SMOKE 没能定位建房按钮(缺 [layout] 日志)")
+            else:
+                await page.click(*target)
+                await asyncio.sleep(8)
+                if shot_path:
+                    await page.shot(shot_path.replace(".png", "_room.png"))
+                    await asyncio.sleep(1)
             pump.cancel()
             return page.logs
     finally:
@@ -225,7 +264,7 @@ async def run(url, shot_path, name, win=None):
         shutil.rmtree(profile, ignore_errors=True)
 
 
-def check(logs, mobile=False):
+def check(logs, name, mobile=False):
     """判定:进没进大厅。"""
     blob = "\n".join(logs)
     problems = []
@@ -263,6 +302,22 @@ def check(logs, mobile=False):
     if "[config]" not in blob:
         problems.append("客户端没打印 [config]:服务器地址没推导出来")
 
+    # 房间页必须真的拿到进房那一刻的 ROOM_STATE。缺这条不是「没点到按钮」,
+    # 更可能是那条状态又被丢了 —— 房间页会停在写死的「房间」+ 空花名册,
+    # 用户看到的就是「进不了房间」。
+    room = re.search(r"\[room\] (.+?) · (\d+) 人 · phase=(\w+)", blob)
+    if not room:
+        problems.append("没看到 [room]:没进到房间里,或者进房的 ROOM_STATE 又被丢了")
+    else:
+        if name not in room.group(1):
+            problems.append(
+                f"房间名是「{room.group(1)}」,不含自己的名字 —— 房间页拿到的"
+                f"可能不是自己刚建的那个房间的状态")
+        if room.group(2) != "1":
+            problems.append(f"房间里显示 {room.group(2)} 人,应该是 1 人(花名册没拿到?)")
+        if room.group(3) != "waiting":
+            problems.append(f"房间 phase={room.group(3)},刚建的房应该是 waiting")
+
     return problems
 
 
@@ -287,9 +342,10 @@ def main():
                 f"web_smoke_{'mobile' if tier['win'] else 'desktop'}.png")
             name = NAME_BASE + tier["tag"]
             print(f"\n=== {tier['name']} ===")
-            logs = asyncio.run(run(url, shot, name, tier["win"]))
-            problems = check(logs, mobile=bool(tier["win"]))
+            logs = asyncio.run(run(url, shot, name, tier["win"], tier["dsf"]))
+            problems = check(logs, name, mobile=bool(tier["win"]))
             print(f"  截图:{shot}")
+            print(f"        {shot.replace('.png', '_room.png')}")
             if problems:
                 failed.append(tier["name"])
                 print(f"  ✗ {tier['name']} 失败:")
@@ -307,7 +363,7 @@ def main():
     if failed:
         print("\n✗ Web 冒烟失败:" + "、".join(failed))
         return 1
-    print("\n✓ Web 冒烟通过:桌面 + 手机竖屏,登录 → 大厅都走通")
+    print("\n✓ Web 冒烟通过:桌面 + 手机竖屏,登录 → 大厅 → 房间都走通")
     return 0
 
 

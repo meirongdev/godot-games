@@ -22,6 +22,11 @@ var _phase := "waiting"
 
 func _ready() -> void:
 	ServerConnection.room_event.connect(_on_room_event)
+	# 房间页以前对连线状态一无所知。手机锁屏、切个应用回来 socket 就断了
+	# (Chrome 冻页面时直接关 WebSocket),而这里既不提示也不自愈,
+	# 表现就是「房间突然不动了」—— 用户报的「连线突然中断」就是这一段。
+	ServerConnection.socket_closed.connect(_on_socket_closed)
+	ServerConnection.room_lost.connect(_on_room_lost)
 	leave_button.pressed.connect(_on_leave)
 	ready_button.toggled.connect(_on_ready_toggled)
 	start_button.pressed.connect(func(): ServerConnection.send(OpCodes.START))
@@ -30,6 +35,33 @@ func _ready() -> void:
 	# 进房那一刻的 ROOM_STATE 是在本场景被切出来之前广播的,那时还没订阅 ——
 	# 补发一次。不补的话房名、花名册、人数会一直空着,直到下一次 sync。
 	ServerConnection.replay_room_state()
+
+
+## 断了。ServerConnection 的巡检会在几秒内重连并重新进房,重连成功后服务端
+## 会重播 ROOM_STATE,_apply_room_state 顺手把这行字盖掉 —— 所以这里只报状态,
+## 不自己修。真的回不去会走 _on_room_lost。
+func _on_socket_closed() -> void:
+	status.text = "和服务器断开了,正在重连…"
+
+
+## 回不去了(房间被关掉 / 对局已开始)。别让人对着一个假房间干等,回大厅。
+func _on_room_lost(reason: String) -> void:
+	_clear_game()
+	ServerConnection.notice = _lost_text(reason)
+	get_tree().change_scene_to_file("res://src/lobby/Lobby.tscn")
+
+
+## 回不去的原因翻成人话。服务端这一路给的是 Nakama 的英文原文,
+## 家里人看不懂;认不出的原样透出,好排查。
+func _lost_text(reason: String) -> String:
+	if "not found" in reason.to_lower():
+		# 一个人的房间空置 60 秒会被 room.lua 自动关掉 —— 锁屏一分钟就够了
+		return "房间已经关了 —— 没人的房间会自动关闭,重新建一个吧"
+	if "游戏已开始" in reason:
+		return "这局已经开始了,进不回去 —— 等他们打完再来"
+	if reason.is_empty():
+		return "掉线太久,回不到房间了"
+	return "回不到房间了:%s" % reason
 
 
 func _on_room_event(op_code: int, payload: Dictionary) -> void:
@@ -57,6 +89,11 @@ func _apply_room_state(payload: Dictionary) -> void:
 	var game_id := str(payload.get("game", ""))
 	var room_name := str(payload.get("name", "房间"))
 	room_title.text = "%s · %s" % [room_name, OpCodes.GAME_LABELS.get(game_id, game_id)]
+
+	# 打一行给排查用。tools/web_smoke.py 靠它断言「真的进到房间里了」——
+	# 以前进房第一条 ROOM_STATE 会被丢掉,房间页停在写死的「房间」+ 空花名册,
+	# 而所有测试层都看不到这件事(见 docs/testing.md)。
+	print("[room] %s · %d 人 · phase=%s" % [room_name, _players.size(), _phase])
 
 	var me := ServerConnection.get_user_id()
 	# 竖屏里竖直空间全给游戏区,名单压成一行(最多 8 人,一两行写完)。
