@@ -59,9 +59,16 @@ import urllib.request
 
 import websockets
 
+# 同目录的两个本地模块。显式把 tools/ 放进 sys.path —— 只靠 sys.path[0]
+# 的话,换个方式调用(python3 -m、从别处 import)就会 ImportError。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # 「另一个玩家」直接复用 e2e_match 里的设备认证和 RPC —— 它不经过 Godot,
 # 起一个房间只要两个 HTTP 请求,比再开一个浏览器便宜得多。
 import e2e_match
+# 客户端诊断记录的解析。语法与 godot/src/net/Probe.gd 一一对应,
+# 契约由 check_probe.gd | probe.py --verify 守着(tools/build_web.sh 里跑)。
+import probe
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 9333
@@ -72,7 +79,8 @@ NAME_BASE = "smoke" + str(int(time.time()))[-5:]
 
 # 两个档位都要过。手机档位是这次的重点,桌面档位防回归。
 # dsf = deviceScaleFactor。逻辑坐标换 CSS 像素时要用(CDP 的输入坐标是 CSS 像素,
-# 而客户端 [layout] 打的窗口尺寸是物理像素)。桌面档位不覆写 metrics,所以是 1。
+# 而客户端 viewport 记录里的窗口尺寸是物理像素)。桌面档位不覆写 metrics,所以是 1。
+# 这一栏是**唯一**的 dsf 来源:CDP 的 setDeviceMetricsOverride 也读它。
 # pointer:桌面发鼠标事件,手机发**真的触屏事件**。这一栏不是形式主义 ——
 # 用鼠标点手机档位,等于没测手机(见上面的说明)。
 TIERS = [
@@ -108,45 +116,6 @@ def assert_port_free():
             sys.exit(
                 f"✗ 调试端口 {PORT} 已被占用 —— 很可能是上次没退干净的 Chrome。\n"
                 f"  先清掉再跑:lsof -ti tcp:{PORT} | xargs -r kill -9")
-
-
-def _css_per_logical(logs, dsf):
-    """逻辑坐标 → CSS 像素的换算系数。CDP 的输入坐标是 CSS 像素,
-    而客户端 [layout] 打的窗口尺寸是物理像素,所以要除一次 dsf。"""
-    m = re.search(r"窗口 (\d+)x(\d+) → 逻辑视口 (\d+)x(\d+)", "\n".join(logs))
-    return None if m is None else (int(m.group(1)) / dsf) / int(m.group(3))
-
-
-def rect_css(logs, dsf, pattern):
-    """从客户端自己打的 [layout] 日志里算出某个控件中心的 CSS 坐标。
-
-    刻意不按 .tscn 反算布局:那种算法每改一次布局就悄悄失准,而客户端会把
-    控件的实际矩形打出来(逻辑坐标),这里只做一次单位换算。
-    """
-    k = _css_per_logical(logs, dsf)
-    m = re.search(pattern, "\n".join(logs))
-    if k is None or m is None:
-        return None
-    x, y, w, h = (int(g) for g in m.groups())
-    return ((x + w / 2) * k, (y + h / 2) * k)
-
-
-def room_row_css(logs, dsf, want):
-    """房间列表里房名含 want 的那一行的 CSS 坐标。
-
-    ⚠️ 必须按房名挑,不能按行号。列表里混着别人建的房、以及上几次冒烟跑完
-    还没被自动关闭的空房间 —— 第一行基本上不是自己要点的那个。
-    取**最后一次**刷新打的坐标:列表每 3 秒重排一次,早先那份可能已经过期。
-    """
-    k = _css_per_logical(logs, dsf)
-    if k is None:
-        return None
-    hit = None
-    for m in re.finditer(r"房间行 \d+ (\d+),(\d+) (\d+)x(\d+) (.*)", "\n".join(logs)):
-        if want in m.group(5):
-            x, y, w, h = (int(g) for g in m.groups()[:4])
-            hit = ((x + w / 2) * k, (y + h / 2) * k)
-    return hit
 
 
 def guest_room(name):
@@ -279,11 +248,13 @@ async def run(url, shot_path, name, win=None, dsf=1, pointer="mouse"):
             pump = asyncio.create_task(page.pump())
 
             if win:
+                # dsf 从档位表来,不再在这里写第二遍 —— 两处数字曾经各改各的,
+                # 而对不上的后果是坐标静静地偏掉,点到别的控件上。
                 await page.send("Emulation.setDeviceMetricsOverride", {
                     "width": win[0], "height": win[1],
-                    "deviceScaleFactor": 3, "mobile": True})
+                    "deviceScaleFactor": dsf, "mobile": True})
                 # 特意不开 Emulation.setTouchEmulationEnabled。实测(A/B/C/D/E 五组
-                # 对照)一开它,name 就打不进去、Enter 也没反应,登录卡死在 [layout]
+                # 对照)一开它,name 就打不进去、Enter 也没反应,登录卡死在 viewport 记录
                 # 之后 —— 跟视口尺寸无关(单独开它、不带 metrics override 照样卡)。
                 #
                 # 机制不是「Chrome 吞事件」,是**焦点换了地方**:
@@ -368,10 +339,19 @@ async def run(url, shot_path, name, win=None, dsf=1, pointer="mouse"):
 
 
 def check(logs, name, mobile=False):
-    """判定:进没进大厅。"""
+    """判定:进没进大厅、进没进房间。
+
+    断言分两类,刻意分开:
+      - **记录类**走 probe.records() —— 客户端主动上报的结构化事实。
+      - **痕迹类**还是在原始日志里找子串 —— 引擎和网络栈自己打的东西
+        (list_rooms 请求、gzip 解压失败、HTTPRequest failed),
+        它们不归 Probe 管,也不该归。
+    """
     blob = "\n".join(logs)
+    recs = probe.records(logs)
     problems = []
 
+    # ---- 痕迹类 ----
     # 只有 Lobby 场景会发 list_rooms —— 它出现,就说明
     # 认证 → 改名 → 刷 session → socket → 切场景 整条链都过了。
     if "/v2/rpc/list_rooms" not in blob:
@@ -385,50 +365,52 @@ def check(logs, name, mobile=False):
     if "HTTPRequest failed" in blob:
         problems.append("有请求失败(HTTPRequest failed)")
 
+    # ---- 记录类 ----
     # 自己必须出现在「在线」里。channel.presences 不含自己,自己是靠一条单独的
     # presence 事件来的 —— 那条事件和 join 的 await 有竞争,曾经时灵时不灵。
-    if not any(re.search(r"\[lobby\] 在线 [1-9]", line) for line in logs):
+    if not any(r.get("count", 0) >= 1 for r in probe.of_kind(recs, "lobby_online")):
         problems.append("大厅「在线」列表里没有自己"
                         " —— join_lobby_async 是不是又把 self_presence 丢了?")
+
+    if probe.last_of(recs, "config") is None:
+        problems.append("客户端没发 config 记录:服务器地址没推导出来")
 
     # 手机档位专属:逻辑视口必须是手机尺寸,不能是 1280。
     # 桌面档位下 1024 宽是正常的,所以只在手机档位查。
     if mobile:
-        m = re.search(r"逻辑视口 (\d+)x", blob)
-        if not m:
-            problems.append("没看到 [layout] 日志,量不出 UI 尺寸")
-        elif int(m.group(1)) > MOBILE_VIEWPORT_MAX:
+        vp = probe.last_of(recs, "viewport")
+        if vp is None:
+            problems.append("没收到 viewport 记录,量不出 UI 尺寸")
+        elif vp["vp_w"] > MOBILE_VIEWPORT_MAX:
             problems.append(
-                f"逻辑视口宽 {m.group(1)},超过 {MOBILE_VIEWPORT_MAX}"
+                f"逻辑视口宽 {vp['vp_w']},超过 {MOBILE_VIEWPORT_MAX}"
                 f" —— 基准分辨率还是桌面的,手机上内容会被缩得点不到")
-
-    if "[config]" not in blob:
-        problems.append("客户端没打印 [config]:服务器地址没推导出来")
 
     # 房间页必须真的拿到进房那一刻的 ROOM_STATE。缺这条不是「没点到按钮」,
     # 更可能是那条状态又被丢了 —— 房间页会停在写死的「房间」+ 空花名册,
     # 用户看到的就是「进不了房间」。
-    rooms = re.findall(r"\[room\] (.+?) · (\d+) 人 · phase=(\w+)", blob)
+    rooms = probe.of_kind(recs, "room_state")
     guest = "别人的房" + name
     if not rooms:
-        problems.append("没看到 [room]:一个房间都没进去,"
+        problems.append("没收到 room_state:一个房间都没进去,"
                         "或者进房的 ROOM_STATE 又被丢了")
         return problems
 
     # ① 第一个进的必须是从**列表里点进去**的那个别人的房间。
-    if guest not in rooms[0][0]:
+    if guest not in rooms[0]["name"]:
         problems.append(
-            f"第一个进的房间是「{rooms[0][0]}」,不是从列表里点进的「{guest}」"
+            f"第一个进的房间是「{rooms[0]['name']}」,不是从列表里点进的「{guest}」"
             f" —— 点房间行进不去了?(手机档位上这条最容易断,见模块文档)")
     # ③ 最后停在自己建的房间里 —— 中间还夹着一次「退出回大厅」。
-    if name not in rooms[-1][0]:
+    last = rooms[-1]
+    if name not in last["name"]:
         problems.append(
-            f"最后停在「{rooms[-1][0]}」而不是自己建的房 ——"
+            f"最后停在「{last['name']}」而不是自己建的房 ——"
             f" 退出回大厅、或者回来之后再建房这一步断了")
-    if rooms[-1][1] != "1":
-        problems.append(f"自己建的房里显示 {rooms[-1][1]} 人,应该是 1 人(花名册没拿到?)")
-    if rooms[-1][2] != "waiting":
-        problems.append(f"自己建的房 phase={rooms[-1][2]},刚建的房应该是 waiting")
+    if last["players"] != 1:
+        problems.append(f"自己建的房里显示 {last['players']} 人,应该是 1 人(花名册没拿到?)")
+    if last["phase"] != "waiting":
+        problems.append(f"自己建的房 phase={last['phase']},刚建的房应该是 waiting")
 
     return problems
 

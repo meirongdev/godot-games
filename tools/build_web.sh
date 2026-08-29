@@ -33,6 +33,14 @@ echo "场景路径检查…"
 echo "字体覆盖检查…"
 "$GODOT" --headless --path godot --script res://tests/check_fonts.gd
 
+# 诊断记录通道的契约。客户端发的记录和 tools/probe.py 解的记录是同一份契约的
+# 两半,以前两边都没测试 —— 改一个格式串,上面两关照样全绿,而层 7b 要么
+# 断言不到、要么按旧坐标点到别的控件上去。check_probe.gd 把 Probe.KINDS
+# 本身发出来,probe.py --verify 拿它对账,任一边改名都会在这里红。
+echo "诊断通道契约检查…"
+"$GODOT" --headless --path godot --script res://tests/check_probe.gd \
+	| python3 "$(dirname "$0")/probe.py" --verify
+
 echo "导出中…"
 "$GODOT" --headless --path godot --export-release "Web" ../build/web/index.html
 

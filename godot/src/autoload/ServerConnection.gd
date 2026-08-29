@@ -73,7 +73,7 @@ func _ready() -> void:
 	_client = Nakama.create_client(
 		cfg.server_key, cfg.host, cfg.port, cfg.scheme, REQUEST_TIMEOUT_SEC)
 	_client.auto_refresh = true
-	print("[config] %s://%s:%d" % [cfg.scheme, cfg.host, cfg.port])
+	Probe.emit("config", {"scheme": cfg.scheme, "host": cfg.host, "port": cfg.port})
 
 
 ## 配置是否可用。false 时 error_message 里是给用户看的原因。

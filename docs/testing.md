@@ -15,14 +15,18 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 > ⚠️ `websockets` 装在**当前 shell 解析到的那个 python3** 里。venv 切换后可能就没了,
 > 报 `ModuleNotFoundError` 先查 `command -v python3`。
 
+> 层 3、3b、3c 同时是**导出门禁**:`tools/build_web.sh` 在导出前依次跑它们,
+> 任一条不过就不出制品(CI 走的也是这个脚本)。
+
 ## 分层速查
 
 | 层 | 命令 | 耗时 | 抓什么 |
 |---|---|---|---|
-| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(82 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
+| 1 Lua 单测 | `cd nakama && docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work imega/busted` | ~2s | 规则与房间逻辑(91 项;容器是 Lua 5.1,对齐 Nakama 的 GopherLua) |
 | 2 GDScript 解析 | `godot --headless --editor --path godot --quit 2>&1 \| grep -icE "SCRIPT ERROR\|Parse Error"`(应为 0) | ~5s | 语法/类型错误 |
 | 3 场景节点路径 | `godot --headless --path godot --script res://tests/check_scenes.gd` | ~3s | `.tscn` 节点名与 `.gd` 里 `$Path` 的错位(运行时才炸的那种) |
 | 3b 字体覆盖 | `godot --headless --path godot --script res://tests/check_fonts.gd` | ~2s | 主题里的字体覆不覆盖 UI 用到的字。**Web 拿不到系统字体**,缺字就是豆腐块,而桌面版靠系统回退看不出来 |
+| 3c 诊断通道契约 | `godot --headless --path godot --script res://tests/check_probe.gd \| python3 tools/probe.py --verify` | ~2s | 客户端发的诊断记录,和 `tools/probe.py` 解的,是不是同一份契约。这条通道**同时承载层 7b 的断言和它的点击靶子** —— 以前客户端那半是散在 4 个文件里的 7 个 print 格式串、Python 那半是 8 条正则,两边都没有测试:改一个格式串,层 1–3b 全绿,而 7b 要么断言不到、要么按旧坐标点到别的控件上去(那种假点击比测不到还糟)。`check_probe.gd` 把 `Probe.KINDS` 本身当记录发出来,Python 侧拿它对账,任一边改名都在这里红 |
 | 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~25s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态、**掉线重连观战**(对局中掉线的人要能回房) |
 | 4b 客户端断线自愈 | `python3 tools/e2e_client_reconnect.py` | ~40s | **真 ServerConnection**(headless Godot)打一个可**冻结**的 TCP 代理,复刻半开连接(Wi-Fi 切 4G:socket 看着连着、收发全黑洞)。断言:探活发现 → 强制重连 → 自动回房。层 1–4 全是 Python 客户端造不出这个,7b 不掐网,桌面拔网线是 close 不是黑洞 —— **只有这层能验「桌面打了 5 轮手机还在等待」修没修好** |
 | 5 场景截图 | 见下 | ~10s/景 | 布局灾难(缩成一团、区域被压成 0 高、控件隐形 —— 层 2/3 全都看不见) |
@@ -63,6 +67,7 @@ docker rm -f nak-default
 | `nakama/modules/`(适配层/RPC) | 1 + 4 | **先 `docker compose restart nakama`**(见坑 ②) |
 | `godot/**.gd` | 2 + 3 | 6 |
 | `godot/src/autoload/ServerConnection.gd`(或任何联机时序) | 2 + 3 + **4b** + **7b** | 层 1–6 一条都覆盖不到这里,见坑 ⑧;断线/重连的时序只有 4b 能造出半开连接 |
+| `godot/src/net/Probe.gd` / `tools/probe.py`(诊断记录的类型或字段) | 2 + **3c** | 3c 是唯一同时看得见两种语言那半的检查。还要跑 **7b + 4b** —— 它俩是这条通道仅有的两个消费者 |
 | `godot/**.tscn` | 3 | 5(布局改动肉眼确认) |
 | 大厅/房间的**点击交互**(点哪儿进哪儿、连的哪个信号) | 2 + 3 + **7b** | 层 5/6 都是鼠标,手指点不动的东西它们看不见,见坑 ⑩ |
 | UI 文案加了新符号/emoji | 3b | 缺字就把它补进 `check_fonts.gd` 的 `MUST`,字体不够就跑 `tools/subset_fonts.sh` 重新生成 |

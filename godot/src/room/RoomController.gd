@@ -95,15 +95,15 @@ func _apply_room_state(payload: Dictionary) -> void:
 	# 打一行给排查用。tools/web_smoke.py 靠它断言「真的进到房间里了」——
 	# 以前进房第一条 ROOM_STATE 会被丢掉,房间页停在写死的「房间」+ 空花名册,
 	# 而所有测试层都看不到这件事(见 docs/testing.md)。
-	print("[room] %s · %d 人 · phase=%s" % [room_name, _players.size(), _phase])
+	Probe.emit("room_state", {
+		"name": room_name, "game": game_id,
+		"players": _players.size(), "phase": _phase})
 
 	# 和大厅同理:把「退出」按钮的实际矩形打出来(逻辑坐标)给冒烟测试当靶子。
 	# 只打第一次 —— ROOM_STATE 每次同步都会走到这儿。
 	if not _logged_leave_rect:
 		_logged_leave_rect = true
-		var lr := leave_button.get_global_rect()
-		print("[layout] 退出按钮 %d,%d %dx%d" % [
-			lr.position.x, lr.position.y, lr.size.x, lr.size.y])
+		Probe.target("leave_button", leave_button.get_global_rect())
 
 	var me := ServerConnection.get_user_id()
 	# 竖屏里竖直空间全给游戏区,名单压成一行(最多 8 人,一两行写完)。

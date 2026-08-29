@@ -70,8 +70,7 @@ func _ready() -> void:
 	# (逻辑坐标)。布局一改这行自动跟着变,冒烟测试就不用自己按 .tscn 反算
 	# 坐标 —— 那种算法每次调布局都会悄悄失准。
 	await get_tree().process_frame
-	var r := create_button.get_global_rect()
-	print("[layout] 建房按钮 %d,%d %dx%d" % [r.position.x, r.position.y, r.size.x, r.size.y])
+	Probe.target("create_button", create_button.get_global_rect())
 
 
 func _show_segment(which: String) -> void:
@@ -89,7 +88,7 @@ func _process(delta: float) -> void:
 func _on_presence_changed(users: Array) -> void:
 	# 打一行给排查用:「在线」是空的还是没刷新,光看截图分不出来。
 	# tools/web_smoke.py 也靠这一行断言自己进了在线列表。
-	print("[lobby] 在线 %d 人" % users.size())
+	Probe.emit("lobby_online", {"count": users.size()})
 	online_list.clear()
 	var me := ServerConnection.get_user_id()
 	users.sort_custom(func(a, b): return a["id"] == me)   # 自己排最前
@@ -192,19 +191,24 @@ func _refresh_rooms() -> void:
 	# 那种假点击比测不到还糟。房间列表里混着别人建的房,所以带上行号和房名,
 	# 测试按名字挑自己要点的那一行。
 	await get_tree().process_frame
-	var lines := PackedStringArray()
+	var rows := []
 	for i in room_list.item_count:
 		var row := room_list.get_item_rect(i)
 		if row.position.y + row.size.y > room_list.size.y:
 			break
-		lines.append("[layout] 房间行 %d %d,%d %dx%d %s" % [
-			i, room_list.global_position.x + row.position.x,
-			room_list.global_position.y + row.position.y,
-			row.size.x, row.size.y, room_list.get_item_text(i)])
-	var blob := "\n".join(lines)
+		rows.append({
+			"i": i,
+			"x": int(room_list.global_position.x + row.position.x),
+			"y": int(room_list.global_position.y + row.position.y),
+			"w": int(row.size.x), "h": int(row.size.y),
+			"text": room_list.get_item_text(i),
+		})
+	# 整批发一条,于是「内容没变就不重发」还是一次字符串比较 ——
+	# 和以前打一个 blob 是同一个道理,只是这回对面拿到的是数组。
+	var blob := JSON.stringify(rows)
 	if blob != _last_row_log:
 		_last_row_log = blob
-		print(blob)
+		Probe.emit("room_rows", {"rows": rows})
 
 
 func _on_room_clicked(index: int, _at_position: Vector2, mouse_button: int) -> void:

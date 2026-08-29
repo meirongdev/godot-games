@@ -55,7 +55,7 @@ homelab 的 namespace、gateway 名、域名硬编码进了游戏仓库,且靠�
 |---|---|
 | 内容 | Godot Web 导出 + nginx(unprivileged),含预压 gzip(wasm 39.5MB → 10.1MB) |
 | 构建 | `.github/workflows/web-image.yml`,CI 内下载 Godot 4.7.2 + 导出模板,然后**调 `tools/build_web.sh`**(和本地同一条导出路径) |
-| 门禁 | 场景节点路径检查 + **字体覆盖检查** + 制品自检(不含测试脚手架、不含环境地址、**含汉字字体**)。不过就不推 |
+| 门禁 | 场景节点路径检查 + **字体覆盖检查** + **诊断通道契约检查** + 制品自检(不含测试脚手架、不含环境地址、**含汉字字体**)。不过就不推 |
 | 触发 | `godot/**`、`images/web/**`、`tools/build_web.sh` 变化 |
 
 ### 2.3 两个镜像都必须匿名可拉

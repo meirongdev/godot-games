@@ -28,8 +28,8 @@ func _ready() -> void:
 	# 见 docs/superpowers/specs/2026-08-27-mobile-portrait-design.md §3。
 	var win := get_window().size
 	var vp := get_viewport_rect().size
-	print("[layout] 窗口 %dx%d → 逻辑视口 %dx%d(缩放 %.2f)" % [
-		win.x, win.y, int(vp.x), int(vp.y), float(win.x) / vp.x])
+	Probe.emit("viewport", {
+		"win_w": win.x, "win_h": win.y, "vp_w": int(vp.x), "vp_h": int(vp.y)})
 
 	# 配置坏了就别等用户填完名字再告诉他 —— 一进门就说,而且把按钮关掉。
 	if not ServerConnection.is_configured():

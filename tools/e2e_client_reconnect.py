@@ -27,6 +27,11 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 客户端诊断记录的解析。NetProbe 走的是产品代码同一条 Probe 通道,
+# 所以这里不再自己写一套 [probe] 正则 —— 语法和解析各只有一份。
+import probe
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROXY_PORT = 7397
 UPSTREAM = ("127.0.0.1", int(os.environ.get("NAKAMA_PORT", "7350")))
@@ -146,11 +151,11 @@ def find_godot():
     sys.exit("找不到 godot(用 GODOT=/path/to/godot 指定)")
 
 
-def wait_for(lines, pattern, timeout, lock, start=0):
-    """等 stdout 第 start 行**之后**出现 pattern。返回耗时,超时返回 None。
+def wait_for(lines, event, timeout, lock, start=0):
+    """等 stdout 第 start 行**之后**出现 net/<event> 记录。返回耗时,超时 None。
 
     ⚠️ start 必须是「触发动作之前」快照的 len(lines)。从 0 扫会匹配到上一阶段
-    的同名标记(第一次连接的 socket_connected、进房时的 room_state),
+    的同名事件(第一次连接的 socket_connected、进房时的 room_state),
     把「什么都没发生」判成通过 —— 这个脚本自己就栽过。
     """
     t0 = time.time()
@@ -159,11 +164,20 @@ def wait_for(lines, pattern, timeout, lock, start=0):
         with lock:
             chunk = lines[seen:]
             seen = len(lines)
-        for line in chunk:
-            if re.search(pattern, line):
+        for rec in probe.records(chunk):
+            if rec.get("k") == "net" and rec.get("event") == event:
                 return time.time() - t0
         time.sleep(0.2)
     return None
+
+
+def fatal_of(lines, lock):
+    """客户端自己报的致命错误。有它就直接说是哪一步挂的,
+    比让调用方去猜「没进房」强 —— 以前这条信息只在 stdout 里躺着。"""
+    with lock:
+        recs = probe.records(list(lines))
+    hits = [r for r in recs if r.get("k") == "fatal"]
+    return hits[-1] if hits else None
 
 
 def main():
@@ -191,8 +205,10 @@ def main():
     failed = []
     try:
         print("== 1. 真客户端经代理登录进房 ==")
-        if wait_for(lines, r"\[probe\] room_joined", 30, lock) is None:
-            sys.exit("✗ 客户端没能进房 —— 先检查 Nakama 起了没")
+        if wait_for(lines, "room_joined", 30, lock) is None:
+            bad = fatal_of(lines, lock)
+            sys.exit(f"✗ 客户端在 {bad['at']} 这步挂了:{bad['error']}" if bad
+                     else "✗ 客户端没能进房 —— 先检查 Nakama 起了没")
 
         print("\n== 2. 冻结代理(半开:黑洞但不断)==")
         with lock:
@@ -209,15 +225,16 @@ def main():
         with lock:
             cur = len(lines)
         proxy.frozen = False
-        t = wait_for(lines, r"\[probe\] socket_connected", RECOVER_DEADLINE, lock, cur)
+        t = wait_for(lines, "socket_connected", RECOVER_DEADLINE, lock, cur)
         if t is None:
             failed.append("解冻后没有重连上")
         else:
             print(f"  ✓ {t:.1f}s 后重连成功")
-        t = wait_for(lines, r"\[probe\] room_state", RECOVER_DEADLINE, lock, cur)
+        t = wait_for(lines, "room_state", RECOVER_DEADLINE, lock, cur)
         if t is None:
             with lock:
-                lost = any("room_lost" in l for l in lines[cur:])
+                lost = any(r.get("event") == "room_lost"
+                           for r in probe.records(lines[cur:]))
             failed.append("重连后被判「回不去」(room_lost)" if lost
                           else "重连后没有自动回到房间(room_state 没出现)")
         else:
