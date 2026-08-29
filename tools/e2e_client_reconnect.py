@@ -14,12 +14,17 @@ Python 客户端,web_smoke 不掐网,桌面真玩拔网线是 close 不是黑洞
 做法:起一个可**冻结**的 TCP 代理(冻结 = 双向不再转发但 TCP 不断),让
 headless Godot 跑真的 ServerConnection(tests/NetProbe.tscn)连代理进房,
 然后冻结代理,断言:
-  1. 客户端在限时内自己发现连接死了(ping 探活)→ socket_closed
+  1. 客户端在限时内自己发现连接死了(ping 探活)→ 判死(probe_timeout)
   2. 解冻后自己重连 → socket_connected
   3. 自己回到房间 → room_state(不需要用户做任何事)
+
+**判死里程碑用决策记录 net/probe_timeout,不用 SDK 的 socket_closed:**
+判死后客户端立刻重连,而代理这时还冻着 —— 这次重连要等 10s 连接超时
+(REQUEST_TIMEOUT_SEC)才放弃,SDK 的 closed 信号跟着才发。拿 socket_closed
+当「发现」,测到的 ~29.5s 里有一半是重连死网络,预算模型(12+3+5=20s)怎么都
+对不上。probe_timeout 是客户端真正「判死」的那一刻,和用户体感一致。
 """
 import os
-import re
 import select
 import socket
 import subprocess
@@ -42,10 +47,15 @@ GODOT_CANDIDATES = [
     "godot",
 ]
 
-# 客户端应在这么多秒内发现半开(巡检 3s + 静默阈值 12s + ping 超时 5s + 余量)
+# 客户端应在这么多秒内**判死**半开连接(巡检 3s + 静默阈值 12s + ping 超时 5s + 余量)。
+# ⚠️ 里程碑是「判死决策」net/probe_timeout,不是 SDK 的 socket_closed:
+# 判死后客户端会立刻重连,而代理此时还冻着 —— 这次重连要等 10s 连接超时
+# (REQUEST_TIMEOUT_SEC)才放弃并触发 closed 信号。拿 socket_closed 当里程碑,
+# 测到的 29.5s 里有一半是「重连死网络」的超时,预算模型(20s)怎么都对不上。
 DETECT_DEADLINE = 30.0
-# 解冻后应在这么多秒内回到房间(重连 + 刷 session + 重新进房)
-RECOVER_DEADLINE = 20.0
+# 解冻后应在这么多秒内回到房间。预算:判死时那次重连还在飞,要等它 10s 超时
+# 落地 + 最多 3s 巡检周期才会发起下一次重连 + 实际连上(1~2s)+ 重新进房。
+RECOVER_DEADLINE = 25.0
 
 
 class FreezableProxy(threading.Thread):
@@ -214,12 +224,12 @@ def main():
         with lock:
             cur = len(lines)
         proxy.frozen = True
-        t = wait_for(lines, r"\[probe\] socket_closed", DETECT_DEADLINE, lock, cur)
+        t = wait_for(lines, "probe_timeout", DETECT_DEADLINE, lock, cur)
         if t is None:
             failed.append(f"半开 {DETECT_DEADLINE:.0f} 秒内没被发现 —— 探活失效,"
                           "这就是「桌面打了 5 轮手机还在等待」")
         else:
-            print(f"  ✓ {t:.1f}s 后客户端自己发现连接死了")
+            print(f"  ✓ {t:.1f}s 后客户端判死(probe_timeout,发现半开)")
 
         print("\n== 3. 解冻(网络恢复)==")
         with lock:

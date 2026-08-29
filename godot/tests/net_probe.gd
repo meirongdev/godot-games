@@ -17,6 +17,13 @@ extends Node
 ##   {"k":"net","event":"tick","t":N,"connected":bool}
 ##   {"k":"fatal","at":"config|login|socket|create_room","error":"…"}
 ##
+## **net 记录有两个发射者,事件名刻意不撞:**
+##   - 本文件发的这些是**结果**(信号驱动:socket 连上/断开、进了房、丢了房)。
+##   - ServerConnection 产品代码在自愈**决策**点也发 net 记录:
+##     probe_start / probe_timeout / reconnect_start / session_refresh /
+##     rejoin_attempt / rejoin_ok(见 autoload/ServerConnection.gd)。
+##   4b 断言「机制」靠决策记录,断言「结果」靠这里的记录;别把两者去重或合并。
+##
 ## 用法(由 e2e_client_reconnect.py 拼好):
 ##   godot --headless --path godot res://tests/NetProbe.tscn \
 ##     -- --nakama-port=<代理端口> --device-suffix=netprobe

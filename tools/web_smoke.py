@@ -42,12 +42,16 @@ Input.dispatchTouchEvent。
 ⚠️ 标签页必须是**可见**的。Chrome 对隐藏标签不跑 requestAnimationFrame,
 而 Godot 的主循环就挂在 rAF 上 —— 标签一隐藏,引擎直接不转,任何等待都会
 超时,看起来像「网络卡住」。无头模式没有这个问题,所以这里固定用无头。
+
+**编排不靠固定 sleep。** 每一步等的是客户端自己报的诊断记录
+(Page.wait_for_record):页面加载等 viewport、进大厅等 lobby_online、
+列表等 room_rows、进房等 room_state。慢机器上多久到就等多久,
+超时是「哪条记录没到」的具体失败,而不是下游断言对不上。
 """
 import asyncio
 import base64
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -146,6 +150,25 @@ class Page:
         self.ws = ws
         self._id = 0
         self.logs = []
+        self._shots = {}
+
+    async def wait_for_record(self, pred, timeout, seen=0, interval=0.2):
+        """等 page.logs[seen:] 里出现一条满足 pred 的诊断记录。返回那条,超时 None。
+
+        取代 run() 里那些「猜客户端走到哪一步」的固定 sleep:等的是客户端
+        自己报的事实,慢机器上多久到就等多久,超时也报得出「哪条记录没到」,
+        而不是下游断言对不上。记录解析复用 tools/probe.py。
+
+        seen 是「触发动作之前」快照的 len(page.logs):跳过旧记录 —— 否则等
+        「create_button 重新出现」「第二条 room_state」这类会匹配到上一次的旧记录。
+        """
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            for rec in probe.records(self.logs[seen:]):
+                if pred(rec):
+                    return rec
+            await asyncio.sleep(interval)
+        return None
 
     async def send(self, method, params=None):
         self._id += 1
@@ -166,8 +189,6 @@ class Page:
             elif m.get("id") in self._shots:
                 path = self._shots.pop(m["id"])
                 open(path, "wb").write(base64.b64decode(m["result"]["data"]))
-
-    _shots = {}
 
     # 点一下。⚠️ kind 一定要跟档位走:手机档位发鼠标事件等于没测手机 ——
     # 鼠标和触屏在引擎里是两条不同的路径,而「只有手指点不动」的 bug
@@ -270,14 +291,20 @@ async def run(url, shot_path, name, win=None, dsf=1, pointer="mouse"):
                 # 这个测试完全没覆盖到。** 软键盘相关的行为只能真机验。
 
             await page.send("Page.navigate", {"url": f"{url}/?player={name}"})
-            await asyncio.sleep(10)          # 38 MB wasm,给足加载时间
+            # 等 viewport:页面加载完、引擎真的开跑(取代固定 10s —— 38 MB wasm
+            # 慢机器上可能不止 10 秒,快机器上又白等。等记录 = 等事实)。
+            if await page.wait_for_record(lambda r: r.get("k") == "viewport", 30) is None:
+                page.logs.append("SMOKE 页面 30 秒内没发 viewport —— 引擎没起来?")
 
             # ⚠️ 不用像素坐标。Login.gd 里 name_edit 开局就 grab_focus(),
             # 软键盘的回车会触发 text_submitted —— 布局怎么改都不影响这里。
             await page.type(name)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.3)
             await page.press_enter()
-            await asyncio.sleep(12)
+            # 等 lobby_online:认证 → 改名 → 刷 session → socket → 切场景
+            # 整条链过完,大厅真的拿到在线列表(取代固定 12s)。
+            if await page.wait_for_record(lambda r: r.get("k") == "lobby_online", 20) is None:
+                page.logs.append("SMOKE 20 秒内没进大厅(没有 lobby_online 记录)")
             if shot_path:
                 await page.shot(shot_path)
                 await asyncio.sleep(1)
@@ -292,36 +319,58 @@ async def run(url, shot_path, name, win=None, dsf=1, pointer="mouse"):
                 # 会以「没进大厅」的形式一起报出来,比一个 traceback 好读。
                 guest = ""
                 page.logs.append(f"SMOKE 另一个玩家建不出房:{e}")
-            await asyncio.sleep(6)     # 等大厅那 3 秒一次的轮询把它捞进列表
+            # 等 room_rows 里真的出现这个房(取代固定 6 秒)—— 大厅 3 秒一轮
+            # 轮询,慢机器上要多刷几轮才捞得进来;等记录就不怕这个。
             # ⚠️ guest 为空时**不能**去找行:room_row_css 的匹配是子串,
             # 空串命中每一行,会点到一个随机房间上去。
-            row = room_row_css(page.logs, dsf, guest) if guest else None
+            row = None
+            if guest:
+                awaited = await page.wait_for_record(
+                    lambda r: r.get("k") == "room_rows" and any(
+                        guest in x.get("text", "") for x in r.get("rows", [])), 15)
+                if awaited is not None:
+                    row = probe.room_row_css(probe.records(page.logs), dsf, guest)
             if row is None:
                 page.logs.append(f"SMOKE 房间列表里没有「{guest}」这一行")
             else:
                 await page.point(*row, kind=pointer)
-                await asyncio.sleep(8)
+                # 等第一条 room_state:真的进到**别人的**房间里了(取代固定 8s)。
+                seen = len(page.logs)
+                if await page.wait_for_record(
+                        lambda r: r.get("k") == "room_state", 10, seen=seen) is None:
+                    page.logs.append("SMOKE 点了房间行后 10 秒内没收到 room_state")
                 if shot_path:
                     await page.shot(shot_path.replace(".png", "_joined.png"))
                     await asyncio.sleep(1)
 
             # ---- ② 点「退出」回大厅。顺带盖住「退了还能不能再来一次」——
             # 这条路上曾经有过 bug(见 create_room_async 的注释)。
-            back = rect_css(page.logs, dsf, r"退出按钮 (\d+),(\d+) (\d+)x(\d+)")
+            back = probe.target_css(probe.records(page.logs), dsf, "leave_button")
             if back is None:
                 page.logs.append("SMOKE 没能定位退出按钮(压根没进到房间里?)")
             else:
                 await page.point(*back, kind=pointer)
-                await asyncio.sleep(6)
+                # 等 create_button 靶子**重新**出现 = 回到大厅了
+                # (Lobby._ready 每次切回来都会重发;seen 跳过进入大厅时那条旧记录)。
+                seen = len(page.logs)
+                if await page.wait_for_record(
+                        lambda r: r.get("k") == "target"
+                        and r.get("name") == "create_button", 10, seen=seen) is None:
+                    page.logs.append("SMOKE 退出后 10 秒内没回到大厅(create_button 没重发)")
 
             # ---- ③ 自己建一个房。房名留空,服务端会起「<名字>的房间」,
             # check() 靠这个名字确认房间页拿到的是**这个**房间的状态。
-            target = rect_css(page.logs, dsf, r"建房按钮 (\d+),(\d+) (\d+)x(\d+)")
+            target = probe.target_css(probe.records(page.logs), dsf, "create_button")
             if target is None:
-                page.logs.append("SMOKE 没能定位建房按钮(缺 [layout] 日志)")
+                page.logs.append("SMOKE 没能定位建房按钮(缺 target 记录)")
             else:
                 await page.point(*target, kind=pointer)
-                await asyncio.sleep(8)
+                # 等 room_state:自己建完房真的进去了(取代固定 8s;
+                # seen 跳过点别人的房那一条旧 room_state)。
+                seen = len(page.logs)
+                if await page.wait_for_record(
+                        lambda r: r.get("k") == "room_state", 10, seen=seen) is None:
+                    page.logs.append("SMOKE 点了建房后 10 秒内没收到 room_state")
                 if shot_path:
                     await page.shot(shot_path.replace(".png", "_room.png"))
                     await asyncio.sleep(1)

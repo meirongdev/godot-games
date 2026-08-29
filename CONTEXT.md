@@ -26,6 +26,7 @@
 | **半开连接** | socket 看着还连着(`is_connected_to_host()` 为真),收发全进黑洞的状态。手机 Wi-Fi 切 4G、蜂窝 NAT 超时的典型结果。**「桌面打了 5 轮,手机还在等待」就是它** | 断线(它恰恰不是普通断线)、假死 |
 | **巡检** | `ServerConnection._process` 里每 3 秒一次的连接体检。房间页一次 HTTP 都不发,这是它唯一的自愈来源 | 心跳(那是另一回事)、轮询 |
 | **探活** | 巡检发现 socket 静默过久之后,主动 ping 一次并给它计时。不回 pong 就判死重连 | 心跳、ping(单指那一次调用时可以) |
+| **判死** | 探活超时(ping 5s 无 pong)后,认定这条连接已死、强制断开并重连。对应决策记录 `net/probe_timeout` | 断线(那是现象)、重连(那是判死之后的动作) |
 
 ## 诊断与测试
 
@@ -34,3 +35,4 @@
 | **诊断记录** | 客户端主动上报的一条结构化事实,格式 `[probe] {json}`。**它是产品代码与测试之间的正式接口**,不是日志:层 7b 的断言和它的点击靶子全部来自它。发在 `godot/src/net/Probe.gd`,解析在 `tools/probe.py`,契约由 `godot/tests/check_probe.gd` 守着 | 日志、调试输出、print(它曾经是,但那正是问题) |
 | **靶子** | 一条 `target` 记录:某个控件的实际矩形(逻辑坐标)。冒烟测试照着它点,而不是按 `.tscn` 反算布局 —— 反算每改一次布局就悄悄失准 | 坐标、锚点 |
 | **门禁** | 不过就不出制品的检查。`tools/build_web.sh` 在导出前依次跑层 3、3b、3c,CI 走的也是这个脚本 | 检查(太泛)、CI(那是执行者不是概念) |
+| **决策记录 / 结果记录** | `net` 记录的两个发射者,事件名刻意不撞:ServerConnection 在自愈**决策**点发 `probe_start` / `probe_timeout` / `reconnect_start` / `session_refresh` / `rejoin_attempt` / `rejoin_ok`;`net_probe.gd` 靠信号发**结果** `socket_connected` / `socket_closed` / `room_joined` / `room_lost` / `room_state` / `tick`。层 4b 断言「机制」用决策记录、断言「结果」用结果记录,别把两者去重或合并 | 日志、print |

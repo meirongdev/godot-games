@@ -125,12 +125,19 @@ func _probe_socket_async() -> void:
 	if _probing:
 		return
 	_probing = true
+	# 探活发起(决策对外可见):自愈机器以前只有判死那一刻一句散文 warning,
+	# 巡检怀疑 / 发起 / 判死 / 重连 / 刷 session / 重新进房全不可见 —— 出问题
+	# 只能靠猜。现在每步都发 net 记录,tools/e2e_client_reconnect.py 能按记录流
+	# 断言「机制」而不是只断言结果,抽 SocketHealth 时也能用记录流 diff 证明行为没变。
+	Probe.emit("net", {"event": "probe_start",
+		"idle_ms": Time.get_ticks_msec() - _last_rx_msec})
 	var got_pong := [false]
 	_ping_and_flag(got_pong)
 	await get_tree().create_timer(PROBE_TIMEOUT_SEC).timeout
 	_probing = false
 	if got_pong[0] or _socket == null or not is_socket_connected():
 		return   # 活着;或者别的路径已经在处理断线了
+	Probe.emit("net", {"event": "probe_timeout"})
 	push_warning("[socket] ping %.0f 秒没回 —— 连接是半开的,强制重连" % PROBE_TIMEOUT_SEC)
 	_socket.close()
 	await ensure_socket_async()
@@ -237,6 +244,7 @@ func ensure_socket_async() -> int:
 		return OK if is_socket_connected() else ERR_CANT_CONNECT
 
 	_reconnecting = true
+	Probe.emit("net", {"event": "reconnect_start"})
 	# 顺序是刻意的:先换新 token,再连 socket,连上了才谈恢复现场。
 	var err := await _refresh_session_async()
 	if err == OK:
@@ -275,6 +283,7 @@ func _refresh_session_async() -> int:
 		error_message = "登录太久失效了,刷新一下页面重新进来"
 		return ERR_UNAUTHORIZED
 	_session = refreshed
+	Probe.emit("net", {"event": "session_refresh"})
 	return OK
 
 
@@ -291,10 +300,12 @@ func _refresh_session_async() -> int:
 func _rejoin_room_async() -> void:
 	if _match_id.is_empty():
 		return
+	Probe.emit("net", {"event": "rejoin_attempt"})
 	# 服务端会在 match_join 里重新广播 ROOM_STATE,房间页据此自己刷新,
 	# 这里不用手动补 —— _match_id 已经是目标房间,那条状态收得到。
 	var m = await _socket.join_match_async(_match_id)
 	if _check(m) == OK:
+		Probe.emit("net", {"event": "rejoin_ok"})
 		return
 	var why := error_message
 	_match_id = ""

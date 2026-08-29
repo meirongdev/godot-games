@@ -28,11 +28,11 @@ python3 -c "import websockets"        # 层 4 依赖;缺了就 python3 -m pip in
 | 3b 字体覆盖 | `godot --headless --path godot --script res://tests/check_fonts.gd` | ~2s | 主题里的字体覆不覆盖 UI 用到的字。**Web 拿不到系统字体**,缺字就是豆腐块,而桌面版靠系统回退看不出来 |
 | 3c 诊断通道契约 | `godot --headless --path godot --script res://tests/check_probe.gd \| python3 tools/probe.py --verify` | ~2s | 客户端发的诊断记录,和 `tools/probe.py` 解的,是不是同一份契约。这条通道**同时承载层 7b 的断言和它的点击靶子** —— 以前客户端那半是散在 4 个文件里的 7 个 print 格式串、Python 那半是 8 条正则,两边都没有测试:改一个格式串,层 1–3b 全绿,而 7b 要么断言不到、要么按旧坐标点到别的控件上去(那种假点击比测不到还糟)。`check_probe.gd` 把 `Probe.KINDS` 本身当记录发出来,Python 侧拿它对账,任一边改名都在这里红 |
 | 4 端到端对局 | `python3 tools/e2e_match.py 3` · `python3 tools/e2e_match.py 5 4` · `python3 tools/e2e_edge.py` | ~25s | 真账号 + 真 WebSocket 打真 Nakama:完整对局、平局加速、走神代出、中途掉线、房间列表状态、**掉线重连观战**(对局中掉线的人要能回房) |
-| 4b 客户端断线自愈 | `python3 tools/e2e_client_reconnect.py` | ~40s | **真 ServerConnection**(headless Godot)打一个可**冻结**的 TCP 代理,复刻半开连接(Wi-Fi 切 4G:socket 看着连着、收发全黑洞)。断言:探活发现 → 强制重连 → 自动回房。层 1–4 全是 Python 客户端造不出这个,7b 不掐网,桌面拔网线是 close 不是黑洞 —— **只有这层能验「桌面打了 5 轮手机还在等待」修没修好** |
+| 4b 客户端断线自愈 | `python3 tools/e2e_client_reconnect.py` | ~35s | **真 ServerConnection**(headless Godot)打一个可**冻结**的 TCP 代理,复刻半开连接(Wi-Fi 切 4G:socket 看着连着、收发全黑洞)。按客户端自己发的 net 决策记录断言:探活发起 → **判死**(probe_timeout)→ 强制重连 → 自动回房。**判死里程碑用决策记录,不用 SDK 的 socket_closed** —— 判死后客户端立刻重连,死网络下那次重连要等 10s 超时才放弃、closed 信号跟着才发,拿它当「发现」会把 ~20s 判死测成 ~29.5s。层 1–4 全是 Python 客户端造不出这个,7b 不掐网,桌面拔网线是 close 不是黑洞 —— **只有这层能验「桌面打了 5 轮手机还在等待」修没修好** |
 | 5 场景截图 | 见下 | ~10s/景 | 布局灾难(缩成一团、区域被压成 0 高、控件隐形 —— 层 2/3 全都看不见) |
 | 6 桌面多开真玩 | `godot --path godot -- --device-suffix=a &`(b、c 同理) | 人肉 | 客户端运行时逻辑与手感 |
 | 7 Web 版(人肉) | `./tools/build_web.sh && python3 tools/serve_web.py` → `http://localhost:8080/?player=a` | ~1min | Web 特有问题(wasm、JS bridge、软键盘)+ **同源拓扑**:serve_web.py 把 `/v2/*` 和 `/ws` 反代到 Nakama,和线上路由一致(契约 §3.3.1) |
-| 7b Web 冒烟(自动) | `python3 tools/web_smoke.py` | ~2min | 真 Chrome 里跑**桌面(鼠标) + 手机竖屏(真触屏事件)**两档:登录 → 大厅 → **点进别人的房间** → 退出 → **自己建房**。断言 `[config]` / `[layout]` 逻辑视口 / `[lobby] 在线` / 两次 `[room]` 的房名人数。**这是唯一会跑到 `ServerConnection` 联机时序的自动测试**(见坑 ⑧),也是唯一用手指而不是鼠标点界面的测试(见坑 ⑩) |
+| 7b Web 冒烟(自动) | `python3 tools/web_smoke.py` | ~1min | 真 Chrome 里跑**桌面(鼠标) + 手机竖屏(真触屏事件)**两档:登录 → 大厅 → **点进别人的房间** → 退出 → **自己建房**。断言 `config` / `viewport` 的逻辑视口 / `lobby_online` / 两次 `room_state` 的房名人数;三个点击靶子(房间行、退出、建房)的坐标也来自 `target` / `room_rows` 记录,解析全在 `tools/probe.py`(见层 3c)。**编排不靠固定 sleep**:`Page.wait_for_record` 等客户端自己报的记录 —— 页面加载等 `viewport`、进大厅等 `lobby_online`、列表等 `room_rows`、进房等 `room_state`;慢机器上多久到就等多久,超时就是「哪条记录没到」的具体失败。**这是唯一会跑到 `ServerConnection` 联机时序的自动测试**(见坑 ⑧),也是唯一用手指而不是鼠标点界面的测试(见坑 ⑩) |
 
 层 4 还能打线上(部署验证,不改源码):
 
